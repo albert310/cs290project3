@@ -1,0 +1,11 @@
+created_at_utc=2026-06-02T09:17:07Z
+env_prefix=/2022533109/chenyuhan/miniconda3/envs/cs290-qwen-vllm
+source_prefix=/2022533109/liubushi/miniconda3/envs/verl-opd-vllm-20260530
+python_verified=1
+torch=2.10.0+cu128
+torch_cuda=12.8
+torch_cuda_available=True
+torch_cuda_device_count=8
+vllm=0.18.0
+huggingface_hub=0.36.2
+hf_transfer=0.1.9

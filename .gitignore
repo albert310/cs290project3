@@ -1,0 +1,8 @@
+models/
+hf_cache/
+.cache/
+logs/
+run/
+*.log
+*.pid
+
