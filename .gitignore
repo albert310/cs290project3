@@ -1,8 +1,10 @@
 models/
 hf_cache/
 .cache/
+data/
 logs/
 run/
 *.log
 *.pid
-
+__pycache__/
+.pytest_cache/
