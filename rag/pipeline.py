@@ -32,6 +32,11 @@ class RAGAnswer:
     hits: List[TextSearchHit] = field(default_factory=list)
     prompt: str = ""
     usage: Optional[Dict[str, Any]] = None
+    search_query: str = ""
+    query_keywords: List[str] = field(default_factory=list)
+    query_keyword_raw: str = ""
+    query_keyword_error: str = ""
+    search_rollout: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -41,6 +46,11 @@ class RAGAnswer:
             "think": self.think,
             "hits": [hit.to_dict() for hit in self.hits],
             "usage": self.usage,
+            "search_query": self.search_query,
+            "query_keywords": self.query_keywords,
+            "query_keyword_raw": self.query_keyword_raw,
+            "query_keyword_error": self.query_keyword_error,
+            "search_rollout": self.search_rollout,
         }
 
 

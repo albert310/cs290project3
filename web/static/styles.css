@@ -128,6 +128,64 @@ textarea {
   font-size: 14px;
 }
 
+.query-keywords {
+  width: min(760px, 100%);
+  color: #4a4a4a;
+  animation: fade-soft 220ms ease both;
+}
+
+.query-keywords summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  list-style: none;
+}
+
+.query-keywords summary::-webkit-details-marker {
+  display: none;
+}
+
+.keyword-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.keyword-list span {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #333333;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.search-query {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rollout-step {
+  width: min(760px, 100%);
+  color: #5a5a5a;
+  font-size: 13px;
+  line-height: 1.5;
+  padding-left: 10px;
+  border-left: 2px solid #e0e0e0;
+  animation: fade-soft 220ms ease both;
+  overflow-wrap: anywhere;
+}
+
 .sources {
   display: grid;
   gap: 8px;

@@ -82,6 +82,56 @@ doc = dataset.get_document(54)
 text = dataset.read_document_text(54)
 ```
 
+## Unified cleaned RAG database
+
+`scripts/build_rag_database.py` builds a cleaned SQLite knowledge store from the
+course-provided `data/sist` dataset and the self-crawled
+`data/shanghaitech_data` dataset.
+
+```bash
+python3 scripts/build_rag_database.py
+```
+
+Outputs:
+
+```text
+data/rag/knowledge.sqlite      unified SQLite database
+data/rag/build_report.md       build counts and source/category distribution
+data/rag/review_samples.md     deterministic samples for manual inspection
+data/rag/manual_review.md      manual review notes and caveats
+```
+
+Current reviewed build:
+
+| item | count |
+|---|---:|
+| documents | 31,217 |
+| chunks | 46,199 |
+| structured records | 15,458 |
+| FTS rows | 46,199 |
+
+SQLite schema:
+
+| table | use |
+|---|---|
+| `documents` | one row per cleaned source document or structured record document |
+| `chunks` | retrievable RAG chunks with source metadata, category, URL, host, date, quality score, and content hash |
+| `chunks_fts` | FTS5 index over tokenized title/text/metadata for lexical retrieval |
+| `structured_records` | raw JSON and metadata for structured rows linked to `chunks.id` |
+| `metadata` | build summary and schema version |
+| `build_events` | reserved for build diagnostics |
+
+The builder keeps high-value sources (`training`, `sist_text`,
+`structured_table`, `structured_json`, official web/text pages, and relevant
+PDFs) and filters common crawler noise: navigation/share widgets, static assets,
+JS/CSS chunks, mojibake, low-confidence structured rows, irrelevant PDFs, and
+known teacher-field parsing artifacts. Manual review details are in
+`data/rag/manual_review.md`.
+
+This database is intended for the next RAG version. Retrieval should combine FTS
+with structured hard filters/reranking for course codes, people, dates, and
+program-year constraints; plain OR-only FTS is not reliable enough for final QA.
+
 ## Keyword retrieval baseline
 
 The `retrieval.keyword_search` module implements a zero-dependency BM25F
@@ -187,16 +237,81 @@ The historical before-optimization validation result is `27/100 = 0.270`. See
 `eval/baseline_rag_summary.md` and `eval/baseline_rag_before_opt.csv` for the
 detailed result table and failure breakdown.
 
+## Unified RAG and optional query-keyword planning
+
+The unified RAG system reads `data/rag/knowledge.sqlite`. By default, it uses the
+original user question directly for retrieval. The first optional optimization is
+LLM query-keyword planning: before retrieval, local Qwen reads the user question
+and outputs short search keywords. The retriever then searches with:
+
+```text
+original question + generated keywords
+```
+
+This optimization is off by default and can be enabled per run:
+
+```bash
+python3 scripts/run_unified_rag.py \
+  "CS282春季任课教师王浩的研究方向是什么？" \
+  --llm-query-keywords \
+  --show-keywords \
+  --show-context
+```
+
+Evaluate with the switch enabled:
+
+```bash
+python3 scripts/eval_unified_rag.py \
+  --output-csv eval/unified_rag_llm_keywords.csv \
+  --top-k 8 \
+  --llm-query-keywords
+```
+
+The output CSV includes `search_query`, `llm_query_keywords`,
+`llm_query_keyword_raw`, and `llm_query_keyword_error` so the optimization can be
+audited and compared against runs where the switch is disabled.
+
+The second optional optimization is iterative search rollout. After the first
+retrieval, local Qwen receives the user question and current evidence, then
+chooses either to stop searching or to request another search with explicit
+keywords. The system allows at most five model-requested searches; after that,
+the final answer must be generated or refused from the accumulated evidence.
+
+```bash
+python3 scripts/run_unified_rag.py \
+  "CS282春季任课教师王浩的研究方向是什么？" \
+  --iterative-search \
+  --show-rollout \
+  --show-context
+```
+
+Evaluate the rollout version:
+
+```bash
+python3 scripts/eval_unified_rag.py \
+  --output-csv eval/unified_rag_rollout.csv \
+  --top-k 8 \
+  --iterative-search \
+  --max-search-steps 5
+```
+
+`--llm-query-keywords` and `--iterative-search` are independent switches and can
+be enabled together.
+
 ## Web chat UI
 
 The web chat frontend is under `web/`. The TypeScript source is
 `web/src/app.ts`, and `web/static/app.js` is the browser-ready build used by the
-server. The local server serves both the frontend and the RAG API. The web demo
-uses `/api/chat/stream` for streaming output: `think_delta` is rendered into the
-expandable thinking block and `answer_delta` is rendered into the answer bubble.
+server. The local server serves both the frontend and the RAG API. By default it
+uses the unified SQLite RAG database. The web demo uses `/api/chat/stream` for
+streaming output: optional `query_keywords` events are rendered as search terms,
+`think_delta` is rendered into the expandable thinking block, and `answer_delta`
+is rendered into the answer bubble.
 
 ```bash
 python3 scripts/serve_web_chat.py --host 127.0.0.1 --port 7860
+python3 scripts/serve_web_chat.py --host 127.0.0.1 --port 7860 --llm-query-keywords
+python3 scripts/serve_web_chat.py --host 127.0.0.1 --port 7860 --iterative-search
 ```
 
 Then open:

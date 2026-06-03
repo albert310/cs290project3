@@ -16,6 +16,7 @@ PIPELINE_PARALLEL_SIZE="${PIPELINE_PARALLEL_SIZE:-7}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.50}"
 GDN_PREFILL_BACKEND="${GDN_PREFILL_BACKEND:-triton}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-32768}"
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-}"
 MAX_EXISTING_GPU_MEMORY_MIB="${MAX_EXISTING_GPU_MEMORY_MIB:-1024}"
 ALLOW_BUSY_GPUS="${ALLOW_BUSY_GPUS:-0}"
 LOG_DIR="${LOG_DIR:-${PROJECT_ROOT}/logs}"
@@ -75,6 +76,7 @@ PIPELINE_PARALLEL_SIZE=${PIPELINE_PARALLEL_SIZE}
 GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION}
 GDN_PREFILL_BACKEND=${GDN_PREFILL_BACKEND}
 MAX_MODEL_LEN=${MAX_MODEL_LEN}
+MAX_NUM_SEQS=${MAX_NUM_SEQS}
 EOF
 
 {
@@ -89,6 +91,7 @@ EOF
   printf 'gpu_memory_utilization=%s\n' "${GPU_MEMORY_UTILIZATION}"
   printf 'gdn_prefill_backend=%s\n' "${GDN_PREFILL_BACKEND}"
   printf 'max_model_len=%s\n' "${MAX_MODEL_LEN}"
+  printf 'max_num_seqs=%s\n' "${MAX_NUM_SEQS:-<default>}"
 } > "${LOG_FILE}"
 
 VLLM_CMD=(
@@ -113,6 +116,10 @@ VLLM_CMD=(
   --dtype bfloat16 \
   --max-model-len "${MAX_MODEL_LEN}"
 )
+
+if [[ -n "${MAX_NUM_SEQS}" ]]; then
+  VLLM_CMD+=(--max-num-seqs "${MAX_NUM_SEQS}")
+fi
 
 setsid "${VLLM_CMD[@]}" >> "${LOG_FILE}" 2>&1 < /dev/null &
 

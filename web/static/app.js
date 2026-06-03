@@ -49,6 +49,7 @@ function appendMessage(role, text) {
 
 function renderSources(parent, hits) {
   if (!hits.length) return;
+  parent.querySelector(".sources")?.remove();
 
   const sources = document.createElement("div");
   sources.className = "sources";
@@ -73,6 +74,53 @@ function renderSources(parent, hits) {
   });
 
   parent.appendChild(sources);
+}
+
+function renderQueryKeywords(parent, keywords, searchQuery) {
+  if (!keywords.length) return;
+
+  const detail = document.createElement("details");
+  detail.className = "query-keywords";
+  detail.open = true;
+
+  const summary = document.createElement("summary");
+  summary.textContent = "检索词";
+
+  const list = document.createElement("div");
+  list.className = "keyword-list";
+  keywords.forEach((keyword) => {
+    const chip = document.createElement("span");
+    chip.textContent = keyword;
+    list.appendChild(chip);
+  });
+
+  detail.appendChild(summary);
+  detail.appendChild(list);
+
+  if (searchQuery?.trim()) {
+    const queryEl = document.createElement("p");
+    queryEl.className = "search-query";
+    queryEl.textContent = searchQuery.trim();
+    detail.appendChild(queryEl);
+  }
+
+  parent.appendChild(detail);
+}
+
+function renderRolloutStep(parent, payload) {
+  const item = document.createElement("div");
+  item.className = "rollout-step";
+
+  const action = payload.action === "search" ? "继续搜索" : "停止搜索";
+  const step = payload.step ?? "";
+  const keywords = payload.keywords?.length ? ` · ${payload.keywords.join(" / ")}` : "";
+  const hits = payload.action === "search" ? ` · 新增 ${payload.new_hit_count ?? 0}/${payload.hit_count ?? 0}` : "";
+  item.textContent = `Step ${step}: ${action}${keywords}${hits}`;
+  if (payload.note) {
+    item.title = payload.note;
+  }
+
+  parent.appendChild(item);
 }
 
 function renderThink(parent, think) {
@@ -137,7 +185,7 @@ async function streamAsk(query, onEvent) {
   const response = await fetch("/api/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, top_k: 6 }),
+    body: JSON.stringify({ query, top_k: 8 }),
   });
 
   if (!response.ok) {
@@ -182,7 +230,11 @@ async function submitQuestion() {
   setBusy(true);
   try {
     await streamAsk(query, (payload) => {
-      if (payload.event === "sources") {
+      if (payload.event === "query_keywords") {
+        renderQueryKeywords(assistantItem, payload.keywords || [], payload.search_query);
+      } else if (payload.event === "search_rollout_step") {
+        renderRolloutStep(assistantItem, payload);
+      } else if (payload.event === "sources") {
         hits = payload.hits || [];
         bubble.textContent = "正在思考...";
         renderSources(assistantItem, hits);

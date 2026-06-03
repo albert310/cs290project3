@@ -15,12 +15,12 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from rag import BaselineRAG, RAGConfig
+from rag import BaselineRAG, RAGConfig, UnifiedRAG, UnifiedRAGConfig
 
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC_DIR = ROOT / "web" / "static"
-RAG_INSTANCE: BaselineRAG | None = None
+RAG_INSTANCE: Any | None = None
 RAG_LOCK = threading.Lock()
 
 
@@ -94,6 +94,10 @@ class ChatHandler(BaseHTTPRequestHandler):
                 {
                     "answer": result.answer,
                     "think": result.think,
+                    "query_keywords": result.query_keywords,
+                    "search_query": result.search_query or result.query,
+                    "query_keyword_error": result.query_keyword_error,
+                    "search_rollout": result.search_rollout,
                     "hits": [hit.to_dict() for hit in result.hits],
                     "latency_sec": latency,
                     "usage": result.usage,
@@ -182,14 +186,25 @@ class ChatHandler(BaseHTTPRequestHandler):
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Serve the TypeScript web chat frontend and baseline RAG API.")
+    parser = argparse.ArgumentParser(description="Serve the TypeScript web chat frontend and RAG API.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7860)
+    parser.add_argument("--rag-mode", choices=("unified", "baseline"), default="unified")
+    parser.add_argument("--db-path", default="data/rag/knowledge.sqlite")
     parser.add_argument("--texts-dir", default="data/sist/texts")
     parser.add_argument("--cache-path", default=".cache/rag_baseline_texts.sqlite")
-    parser.add_argument("--top-k", type=int, default=6)
-    parser.add_argument("--max-context-chars", type=int, default=5600)
+    parser.add_argument("--top-k", type=int, default=None)
+    parser.add_argument("--max-context-chars", type=int, default=None)
     parser.add_argument("--max-tokens", type=int, default=None)
+    parser.add_argument("--llm-query-keywords", action="store_true")
+    parser.add_argument("--query-keyword-max-tokens", type=int, default=256)
+    parser.add_argument("--query-keyword-max-terms", type=int, default=12)
+    parser.add_argument("--query-keyword-thinking", action="store_true")
+    parser.add_argument("--iterative-search", action="store_true")
+    parser.add_argument("--max-search-steps", type=int, default=5)
+    parser.add_argument("--rollout-decision-max-tokens", type=int, default=512)
+    parser.add_argument("--rollout-decision-thinking", action="store_true")
+    parser.add_argument("--rollout-hits-per-step", type=int, default=5)
     parser.add_argument("--rebuild-index", action="store_true")
     return parser.parse_args(argv)
 
@@ -198,16 +213,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     global RAG_INSTANCE
     args = parse_args(argv)
     port = find_port(args.port, args.host)
-    config = RAGConfig(
-        texts_dir=Path(args.texts_dir),
-        cache_path=Path(args.cache_path),
-        top_k=args.top_k,
-        max_context_chars=args.max_context_chars,
-        max_tokens=args.max_tokens,
-    )
-    RAG_INSTANCE = BaselineRAG(config).open(rebuild_index=args.rebuild_index)
+    if args.rag_mode == "baseline":
+        config = RAGConfig(
+            texts_dir=Path(args.texts_dir),
+            cache_path=Path(args.cache_path),
+            top_k=args.top_k or 6,
+            max_context_chars=args.max_context_chars or 5600,
+            max_tokens=args.max_tokens,
+        )
+        RAG_INSTANCE = BaselineRAG(config).open(rebuild_index=args.rebuild_index)
+    else:
+        config = UnifiedRAGConfig(
+            db_path=Path(args.db_path),
+            top_k=args.top_k or 8,
+            max_context_chars=args.max_context_chars or 7200,
+            max_tokens=args.max_tokens,
+            enable_llm_query_keywords=args.llm_query_keywords,
+            query_keyword_max_tokens=args.query_keyword_max_tokens,
+            query_keyword_max_terms=args.query_keyword_max_terms,
+            query_keyword_enable_thinking=args.query_keyword_thinking,
+            enable_iterative_search=args.iterative_search,
+            max_search_steps=args.max_search_steps,
+            rollout_decision_max_tokens=args.rollout_decision_max_tokens,
+            rollout_decision_enable_thinking=args.rollout_decision_thinking,
+            rollout_hits_per_step=args.rollout_hits_per_step,
+        )
+        RAG_INSTANCE = UnifiedRAG(config).open()
     server = ThreadingHTTPServer((args.host, port), ChatHandler)
-    print(f"Serving web chat at http://{args.host}:{port}")
+    print(f"Serving {args.rag_mode} web chat at http://{args.host}:{port}")
     print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()
