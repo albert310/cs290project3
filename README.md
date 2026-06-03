@@ -82,6 +82,129 @@ doc = dataset.get_document(54)
 text = dataset.read_document_text(54)
 ```
 
+## Keyword retrieval baseline
+
+The `retrieval.keyword_search` module implements a zero-dependency BM25F
+keyword retriever over `chunks.jsonl` plus selected structured JSONL tables
+(`contacts`, `courses`, `faculty_members`, `program_requirements`, etc.).
+Use `--chunks-only` when you want a pure chunk baseline.
+
+It uses mixed Chinese/English tokenization:
+
+- English words and course-like codes are lowercased as normal tokens.
+- Chinese text contributes character unigrams, bigrams, and trigrams.
+- BM25F field weights are `title=3.0`, `text=1.0`, `category=0.8`, `url=0.2`.
+
+A small Chinese/English query expansion map is available as an optional
+experiment, e.g. `邮箱 -> email`, `学分 -> credits`, `任课老师 -> instructor`,
+`信息学院 -> SIST`. Keep it off for the baseline and enable it with `--expand`
+when measuring query expansion as an optimization.
+
+CLI:
+
+```bash
+PYTHONPATH=. python3 -m retrieval.keyword_search "深度学习 任课老师" --top-k 5
+PYTHONPATH=. python3 -m retrieval.keyword_search "计算机科学与技术 毕业 学分" --top-k 5
+PYTHONPATH=. python3 -m retrieval.keyword_search "屠可伟 邮箱" --top-k 5
+PYTHONPATH=. python3 -m retrieval.keyword_search "屠可伟 邮箱" --chunks-only --top-k 5
+PYTHONPATH=. python3 -m retrieval.keyword_search "屠可伟 邮箱" --expand --top-k 5
+```
+
+Python:
+
+```python
+from sist_data import SISTDataset
+from retrieval import BM25FIndex
+
+dataset = SISTDataset("data/sist")
+index = BM25FIndex.from_dataset(dataset)
+hits = index.search("深度学习 任课老师", top_k=5)
+
+for hit in hits:
+    print(hit.score, hit.metadata["title"], hit.metadata["url"])
+```
+
+## Web-verified evaluation set
+
+`eval/testset_web_verified.jsonl` contains 100 ShanghaiTech/SIST questions built
+from public official web pages, independent of the provided `data/sist`
+archive. The set covers university profile facts, SIST profile/admission facts,
+course-catalog questions, faculty-profile questions, comparative questions,
+conditional questions, multi-hop questions, time-sensitive facts, and
+negative-refusal questions where the user asks for nonexistent information.
+
+Current question type distribution is `factual=50`, `comparative=10`,
+`conditional=10`, `multi-hop=10`, `time_sensitive=10`, and
+`negative_refusal=10`.
+
+Regenerate, validate, source-check, and export the project-required result
+table:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 eval/build_web_testset.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/evaluate_testset.py --testset eval/testset_web_verified.jsonl --validate
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_testset_sources.py --testset eval/testset_web_verified.jsonl
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/evaluate_testset.py --testset eval/testset_web_verified.jsonl --export-csv eval/testset_web_verified.csv
+```
+
+After filling model outputs into `sys_resp_before_opt` and
+`sys_resp_after_opt`, score the table automatically:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/evaluate_testset.py --testset eval/testset_web_verified.jsonl --answers-csv eval/testset_web_verified.csv --output-csv eval/testset_scored.csv
+```
+
+See `eval/README.md` for the schema, sources, and evaluation rules.
+
+## Text-only baseline RAG
+
+The first baseline RAG system uses only preprocessed plain-text files under
+`data/sist/texts`. It builds a local SQLite FTS5 index over text chunks, retrieves
+the top-k chunks, inserts them into a grounded prompt, and asks the local Qwen
+server to answer with thinking enabled by default.
+
+By default the baseline does not pass `max_tokens` to the local Qwen server.
+Generation therefore stops on the model/server stopping condition rather than a
+project-side answer-length cap. You can still set a cap manually with
+`--max-tokens N` when running the scripts.
+
+Run one question:
+
+```bash
+python3 scripts/run_baseline_rag.py "上海科技大学校园占地约多少亩？" --show-context
+```
+
+Run validation on the 100-question test set:
+
+```bash
+python3 scripts/eval_baseline_rag.py \
+  --testset eval/testset_web_verified.jsonl \
+  --output-csv eval/baseline_rag_before_opt.csv \
+  --top-k 6
+```
+
+The historical before-optimization validation result is `27/100 = 0.270`. See
+`eval/baseline_rag_summary.md` and `eval/baseline_rag_before_opt.csv` for the
+detailed result table and failure breakdown.
+
+## Web chat UI
+
+The web chat frontend is under `web/`. The TypeScript source is
+`web/src/app.ts`, and `web/static/app.js` is the browser-ready build used by the
+server. The local server serves both the frontend and the RAG API. The web demo
+uses `/api/chat/stream` for streaming output: `think_delta` is rendered into the
+expandable thinking block and `answer_delta` is rendered into the answer bubble.
+
+```bash
+python3 scripts/serve_web_chat.py --host 127.0.0.1 --port 7860
+```
+
+Then open:
+
+```text
+http://127.0.0.1:7860
+```
+
 ## Local Qwen API wrapper
 
 The `qwen_api` package wraps the local OpenAI-compatible vLLM server and splits

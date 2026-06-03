@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SIST RAG Chat</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell empty" id="app">
+      <section class="chat-stage" aria-live="polite">
+        <div class="messages" id="messages"></div>
+      </section>
+
+      <form class="composer" id="composer">
+        <button class="icon-button" type="button" id="clearButton" aria-label="清空对话" title="清空对话">
+          <span aria-hidden="true">＋</span>
+        </button>
+        <textarea id="queryInput" rows="1" placeholder="有问题，尽管问" autocomplete="off"></textarea>
+        <button class="send-button" type="submit" id="sendButton" aria-label="发送" title="发送">
+          <span class="send-arrow" aria-hidden="true">→</span>
+          <span class="send-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        </button>
+      </form>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
