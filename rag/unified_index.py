@@ -13,11 +13,15 @@ from .text_index import make_match_query
 
 
 COURSE_CODE_RE = re.compile(r"(?<![A-Za-z0-9])([A-Z]{2,}\d{2,4}[A-Z]?)(?![A-Za-z0-9])", flags=re.IGNORECASE)
+PROGRAM_CODE_RE = re.compile(r"(?<![A-Za-z0-9])(CS|EE|IE|CSEE|SI)(?![A-Za-z0-9])", flags=re.IGNORECASE)
 YEAR_RE = re.compile(r"(20\d{2})")
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 CJK_PHRASE_RE = re.compile(r"[\u4e00-\u9fff]{2,8}")
 
 SOURCE_PRIORITY = {
+    "verified_seed": 7.0,
+    "live_official": 6.2,
+    "local_official_mirror": 5.0,
     "training": 5.0,
     "structured_json": 4.6,
     "structured_table": 4.4,
@@ -41,6 +45,12 @@ STRUCTURED_CATEGORIES = {
     "program_sources",
     "events",
     "leadership_roles",
+    "university_overview",
+    "university_contact",
+    "sist_overview",
+    "sist_degree_programs",
+    "sist_news_events",
+    "sist_research",
 }
 
 QUERY_EXPANSIONS = {
@@ -119,6 +129,173 @@ def _query_course_codes(query: str) -> List[str]:
 
 def _query_years(query: str) -> List[str]:
     return sorted({match.group(1) for match in YEAR_RE.finditer(query)})
+
+
+def _query_program_codes(query: str) -> List[str]:
+    return sorted({match.group(1).upper() for match in PROGRAM_CODE_RE.finditer(query)})
+
+
+def _has_degree_intent(query: str) -> bool:
+    lowered = query.lower()
+    return any(
+        term in query or term in lowered
+        for term in (
+            "培养方案",
+            "学位",
+            "毕业要求",
+            "本科",
+            "硕士",
+            "博士",
+            "degree program",
+            "degree programmes",
+            "program requirements",
+            "bachelor",
+            "master",
+            "phd",
+            "ph.d",
+        )
+    )
+
+
+def _has_course_intent(query: str) -> bool:
+    lowered = query.lower()
+    return any(
+        term in query or term in lowered
+        for term in (
+            "课程",
+            "课表",
+            "任课",
+            "老师",
+            "教师",
+            "学分",
+            "课程代码",
+            "course",
+            "courses",
+            "instructor",
+            "teacher",
+            "semester",
+            "spring",
+            "fall",
+        )
+    )
+
+
+def _has_sist_overview_intent(query: str) -> bool:
+    lowered = query.lower()
+    has_entity = (
+        "sist" in lowered
+        or "信息学院" in query
+        or "信息科学与技术学院" in query
+        or "school of information science and technology" in lowered
+    )
+    if not has_entity:
+        return False
+    overview_terms = (
+        "overview",
+        "about",
+        "vision",
+        "mission",
+        "at a glance",
+        "概况",
+        "简介",
+        "介绍",
+        "是什么",
+        "about sist",
+    )
+    if any(term in lowered or term in query for term in overview_terms):
+        return True
+    return not any(
+        intent(query)
+        for intent in (_has_degree_intent, _has_course_intent, _profileish_query)
+    )
+
+
+def _clean_intent_boost(query: str, row: sqlite3.Row) -> float:
+    text = str(row["text"] or "")
+    title = str(row["title"] or "")
+    title_lower = title.lower()
+    text_head_lower = text[:900].lower()
+    url = str(row["url"] or "").lower()
+    category = str(row["category"] or "")
+    score = 0.0
+
+    if _has_sist_overview_intent(query):
+        if category == "sist_overview":
+            score += 70.0
+        elif category in {"sist_news_events", "sist_courses", "sist_degree_programs", "sist_faculty"}:
+            score -= 26.0
+        if url.rstrip("/") in {
+            "https://sist.shanghaitech.edu.cn",
+            "https://sist.shanghaitech.edu.cn/sist_en",
+            "https://faculty.sist.shanghaitech.edu.cn",
+        }:
+            score += 60.0
+        if any(marker in url for marker in ("sist_en", "about", "overview")):
+            score += 30.0
+        if any(term in text_head_lower for term in ("about sist", "sist at a glance", "vision and mission")):
+            score += 28.0
+        if any(term in title_lower for term in ("school of information science and technology", "信息科学与技术学院")):
+            score += 12.0
+
+    if _has_degree_intent(query):
+        if category == "sist_degree_programs":
+            score += 24.0
+        elif category in {"sist_courses", "sist_news_events"}:
+            score -= 18.0
+        if any(marker in url for marker in ("degree", "programme", "program", "pyfa")):
+            score += 16.0
+        if any(term in title_lower for term in ("培养方案", "degree", "program")):
+            score += 6.0
+
+    if _has_course_intent(query):
+        if category == "sist_courses":
+            score += 24.0
+        elif category == "sist_news_events":
+            score -= 18.0
+        if any(marker in url for marker in ("course", "courses", "schedule")):
+            score += 16.0
+        if any(term in title_lower for term in ("course", "课程", "课表", "schedule")):
+            score += 6.0
+
+    if _profileish_query(query):
+        if category == "sist_faculty":
+            score += 24.0
+        elif category == "sist_news_events":
+            score -= 18.0
+        if any(marker in url for marker in ("faculty", "main.htm")):
+            score += 16.0
+        if any(term in text for term in ("邮箱", "办公室", "研究方向", "博士毕业院校")):
+            score += 10.0
+
+    years = _query_years(query)
+    if years:
+        if any(year in url or year in title_lower or year in text_head_lower for year in years):
+            score += 18.0
+        else:
+            score -= 10.0
+
+    for code in _query_program_codes(query):
+        code_lower = code.lower()
+        encoded_markers = (
+            f"in%20{code_lower}",
+            f"in_{code_lower}",
+            f"{code_lower}.htm",
+            f"{code_lower}.pdf",
+            f"{code_lower}%e5",
+        )
+        if any(marker in url for marker in encoded_markers):
+            score += 36.0
+        if code == "CS" and ("计算机科学与技术" in text or "computer science" in text_head_lower):
+            score += 20.0
+        if code == "EE" and ("电子信息工程" in text or "electrical" in text_head_lower or "electronic" in text_head_lower):
+            score += 20.0
+        if category == "sist_degree_programs" and any(term in query.lower() for term in ("bachelor", "本科", "培养方案")):
+            if "degree%20program" in url or "degree programmes" in url:
+                score += 22.0
+
+    if category == "sist_news_events" and any(term in title for term in ("询价", "采购", "公告", "家具", "报名启动")):
+        score -= 12.0
+    return score
 
 
 def _profileish_query(query: str) -> bool:
@@ -224,10 +401,16 @@ class UnifiedRAGIndex:
     def __init__(self, db_path: Path = Path("data/rag/knowledge.sqlite")) -> None:
         self.db_path = db_path
         self.conn: Optional[sqlite3.Connection] = None
+        self.schema_variant = "unified"
 
     def open(self) -> "UnifiedRAGIndex":
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        columns = {str(row[1]) for row in self.conn.execute("pragma table_info(chunks)").fetchall()}
+        if {"source_tier", "source_url", "quality"}.issubset(columns):
+            self.schema_variant = "clean_rag_data"
+        else:
+            self.schema_variant = "unified"
         return self
 
     def close(self) -> None:
@@ -238,11 +421,15 @@ class UnifiedRAGIndex:
     def stats(self) -> Dict[str, Any]:
         assert self.conn is not None
         out: Dict[str, Any] = {"db_path": str(self.db_path)}
-        for table in ("documents", "chunks", "chunks_fts", "structured_records"):
+        tables = ["documents", "chunks", "chunks_fts"]
+        if self.schema_variant != "clean_rag_data":
+            tables.append("structured_records")
+        for table in tables:
             out[table] = self.conn.execute(f"select count(*) from {table}").fetchone()[0]
         row = self.conn.execute("select value from metadata where key='build_summary'").fetchone()
         if row:
             out["build_summary"] = json.loads(row[0])
+        out["schema_variant"] = self.schema_variant
         return out
 
     def search(self, query: str, *, top_k: int = 8, candidate_limit: int = 180) -> List[UnifiedSearchHit]:
@@ -251,6 +438,11 @@ class UnifiedRAGIndex:
         candidates: Dict[int, Tuple[sqlite3.Row, float]] = {}
         for row, raw_score in self._exact_candidates(query, limit=max(top_k * 8, 40)):
             candidates[int(row["id"])] = (row, raw_score)
+        if self.schema_variant == "clean_rag_data":
+            for row, raw_score in self._clean_supplemental_candidates(query, limit=max(top_k * 10, 60)):
+                current = candidates.get(int(row["id"]))
+                if current is None or raw_score > current[1]:
+                    candidates[int(row["id"])] = (row, raw_score)
         for row, raw_score in self._fts_candidates(query, limit=candidate_limit):
             current = candidates.get(int(row["id"]))
             if current is None or raw_score > current[1]:
@@ -277,10 +469,19 @@ class UnifiedRAGIndex:
         match_query = make_match_query(_expand_query(query), max_terms=72)
         if not match_query:
             return []
+        if self.schema_variant == "clean_rag_data":
+            select_columns = """
+                c.id, c.chunk_uid, c.doc_id, c.chunk_index, c.text, c.title,
+                c.source_path, c.source_tier as source_type, c.category,
+                c.source_url as url, c.host, c.date, c.quality as quality_score,
+                c.metadata_json
+            """
+        else:
+            select_columns = "c.*"
         try:
             rows = self.conn.execute(
-                """
-                select bm25(chunks_fts) as bm25_rank, c.*
+                f"""
+                select bm25(chunks_fts) as bm25_rank, {select_columns}
                 from chunks_fts
                 join chunks c on c.id = chunks_fts.rowid
                 where chunks_fts match ?
@@ -297,6 +498,16 @@ class UnifiedRAGIndex:
         assert self.conn is not None
         clauses: List[str] = []
         params: List[Any] = []
+        url_column = "source_url" if self.schema_variant == "clean_rag_data" else "url"
+        quality_column = "quality" if self.schema_variant == "clean_rag_data" else "quality_score"
+        if self.schema_variant == "clean_rag_data":
+            select_columns = """
+                id, chunk_uid, doc_id, chunk_index, text, title, source_path,
+                source_tier as source_type, category, source_url as url, host,
+                date, quality as quality_score, metadata_json
+            """
+        else:
+            select_columns = "*"
 
         for code in _query_course_codes(query):
             clauses.append("(upper(title)=? or upper(text) like ? or upper(text) like ?)")
@@ -314,7 +525,7 @@ class UnifiedRAGIndex:
 
         if _profileish_query(query):
             for phrase in _query_exact_cjk_phrases(query):
-                clauses.append("(title like ? or text like ? or url like ? or source_path like ?)")
+                clauses.append(f"(title like ? or text like ? or {url_column} like ? or source_path like ?)")
                 params.extend([f"%{phrase}%", f"%{phrase}%", f"%{phrase}%", f"%{phrase}%"])
 
         if not clauses:
@@ -322,15 +533,116 @@ class UnifiedRAGIndex:
 
         rows = self.conn.execute(
             f"""
-            select *
+            select {select_columns}
             from chunks
             where {' or '.join(clauses)}
-            order by quality_score desc, source_type, id
+            order by {quality_column} desc, id
             limit ?
             """,
             (*params, limit),
         ).fetchall()
         return [(row, 20.0) for row in rows]
+
+    def _clean_supplemental_candidates(self, query: str, *, limit: int) -> Iterable[Tuple[sqlite3.Row, float]]:
+        assert self.conn is not None
+        clauses: List[str] = []
+        params: List[Any] = []
+        years = _query_years(query)
+        program_codes = _query_program_codes(query)
+
+        if _has_degree_intent(query):
+            base = ["category = 'sist_degree_programs'"]
+            if years:
+                year_clauses = []
+                for year in years:
+                    year_clauses.append("(source_url like ? or title like ? or text like ?)")
+                    params.extend([f"%{year}%", f"%{year}%", f"%{year}%"])
+                base.append("(" + " or ".join(year_clauses) + ")")
+            if program_codes:
+                code_clauses = []
+                for code in program_codes:
+                    code_lower = code.lower()
+                    if code == "CS":
+                        code_clauses.append(
+                            "(lower(source_url) like ? or lower(source_url) like ? or text like ? or lower(text) like ?)"
+                        )
+                        params.extend([f"%in%20{code_lower}.htm%", f"%in%20{code_lower}%", "%计算机科学与技术%", "%computer science%"])
+                    elif code == "EE":
+                        code_clauses.append(
+                            "(lower(source_url) like ? or lower(source_url) like ? or text like ? or lower(text) like ? or lower(text) like ?)"
+                        )
+                        params.extend([f"%in%20{code_lower}.htm%", f"%in%20{code_lower}%", "%电子信息工程%", "%electrical%", "%electronic%"])
+                    else:
+                        code_clauses.append("(lower(source_url) like ? or title like ? or text like ?)")
+                        params.extend([f"%{code_lower}%", f"%{code}%", f"%{code}%"])
+                base.append("(" + " or ".join(code_clauses) + ")")
+            if any(term in query.lower() for term in ("bachelor", "本科")):
+                base.append("(lower(source_url) like '%undergraduate%' or lower(source_url) like '%bachelor%')")
+            clauses.append("(" + " and ".join(base) + ")")
+
+        if _has_course_intent(query):
+            base = ["category = 'sist_courses'"]
+            codes = _query_course_codes(query)
+            if codes:
+                code_clauses = []
+                for code in codes:
+                    code_clauses.append("(title like ? or text like ? or source_url like ?)")
+                    params.extend([f"%{code}%", f"%{code}%", f"%{code}%"])
+                base.append("(" + " or ".join(code_clauses) + ")")
+            if years:
+                year_clauses = []
+                for year in years:
+                    year_clauses.append("(source_url like ? or title like ? or text like ?)")
+                    params.extend([f"%{year}%", f"%{year}%", f"%{year}%"])
+                base.append("(" + " or ".join(year_clauses) + ")")
+            clauses.append("(" + " and ".join(base) + ")")
+
+        if _profileish_query(query):
+            names = [
+                phrase
+                for phrase in _query_exact_cjk_phrases(query)
+                if phrase not in {"教授", "教师", "导师", "邮箱", "办公室", "研究方向"}
+            ]
+            if names:
+                base = ["category = 'sist_faculty'"]
+                name_clauses = []
+                for name in names:
+                    name_clauses.append("(title like ? or text like ? or source_url like ?)")
+                    params.extend([f"%{name}%", f"%{name}%", f"%{name}%"])
+                base.append("(" + " or ".join(name_clauses) + ")")
+                clauses.append("(" + " and ".join(base) + ")")
+
+        if _has_sist_overview_intent(query):
+            clauses.append(
+                "("
+                "category = 'sist_overview' "
+                "or source_url in ('https://sist.shanghaitech.edu.cn/', 'https://sist.shanghaitech.edu.cn/sist_en/', 'https://faculty.sist.shanghaitech.edu.cn/') "
+                "or lower(text) like '%sist at a glance%' "
+                "or lower(text) like '%about sist%' "
+                "or lower(text) like '%vision and mission%'"
+                ")"
+            )
+
+        if not clauses:
+            return []
+
+        rows = self.conn.execute(
+            f"""
+            select
+                id, chunk_uid, doc_id, chunk_index, text, title, source_path,
+                source_tier as source_type, category, source_url as url, host,
+                date, quality as quality_score, metadata_json
+            from chunks
+            where {' or '.join(clauses)}
+            order by source_tier = 'verified_seed' desc,
+                     source_tier = 'live_official' desc,
+                     quality desc,
+                     id asc
+            limit ?
+            """,
+            (*params, limit),
+        ).fetchall()
+        return [(row, 26.0) for row in rows]
 
     def _rerank(self, query: str, row: sqlite3.Row, raw_score: float) -> float:
         text = str(row["text"] or "")
@@ -426,6 +738,9 @@ class UnifiedRAGIndex:
 
         if any(term in query for term in ("开放时间", "图书馆")) and "library" in str(row["host"] or ""):
             score += 10.0
+
+        if self.schema_variant == "clean_rag_data":
+            score += _clean_intent_boost(query, row)
 
         return score
 

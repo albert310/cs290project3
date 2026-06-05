@@ -1,0 +1,65 @@
+[
+  {
+    "id": "fact_university_jointly_founded",
+    "category": "university_overview",
+    "question": "上海科技大学是谁共同举办和建设的？",
+    "expected_terms": ["Shanghai Municipal Government", "Chinese Academy of Sciences"],
+    "answer": "ShanghaiTech University is jointly founded by Shanghai Municipal Government and Chinese Academy of Sciences.",
+    "source_url": "https://www.shanghaitech.edu.cn/en/997/main.psp",
+    "source_note": "Official ShanghaiTech About page."
+  },
+  {
+    "id": "fact_university_established_2013",
+    "category": "university_overview",
+    "question": "上海科技大学正式建立是哪一年？",
+    "expected_terms": ["2013", "ShanghaiTech University"],
+    "answer": "ShanghaiTech University was officially established in 2013.",
+    "source_url": "https://www.shanghaitech.edu.cn/en/997/main.psp",
+    "source_note": "Official ShanghaiTech About page."
+  },
+  {
+    "id": "fact_university_address",
+    "category": "university_contact",
+    "question": "上海科技大学浦东校区地址是什么？",
+    "expected_terms": ["393", "Huaxia", "Pudong"],
+    "answer": "The Pudong campus address is 393 Huaxia Middle Road, Pudong New Area, Shanghai.",
+    "source_url": "https://www.shanghaitech.edu.cn/en/1059/list.psp",
+    "source_note": "Official ShanghaiTech contact page."
+  },
+  {
+    "id": "fact_sist_full_name",
+    "category": "sist_overview",
+    "question": "SIST 的英文全称是什么？",
+    "expected_terms": ["School of Information Science and Technology", "ShanghaiTech"],
+    "answer": "SIST stands for School of Information Science and Technology at ShanghaiTech University.",
+    "source_url": "https://sist.shanghaitech.edu.cn/sist_en/",
+    "source_note": "Official SIST English site."
+  },
+  {
+    "id": "fact_sist_first_school",
+    "category": "sist_overview",
+    "question": "信息科学与技术学院在上海科技大学建校初期处于什么地位？",
+    "expected_terms": ["first", "School of Information Science and Technology"],
+    "answer": "SIST is described as the first school established at ShanghaiTech University.",
+    "source_url": "https://sist.shanghaitech.edu.cn/sist_en/",
+    "source_note": "Official SIST English site."
+  },
+  {
+    "id": "fact_sist_courses_2024_2025",
+    "category": "sist_courses",
+    "question": "哪里可以查到信息学院 2024-2025 学年课程？",
+    "expected_terms": ["SIST", "2024-2025", "Courses"],
+    "answer": "The official SIST 2024-2025 course list is published by the SIST faculty academics site.",
+    "source_url": "https://faculty.sist.shanghaitech.edu.cn/office/Academics/Courses/SIST_2024-2025_Courses.htm",
+    "source_note": "Official SIST course list."
+  },
+  {
+    "id": "fact_wang_haoyu_email",
+    "category": "sist_faculty",
+    "question": "王浩宇教授的邮箱是什么？",
+    "expected_terms": ["王浩宇", "wanghy@shanghaitech.edu.cn"],
+    "answer": "Wang Haoyu's official SIST profile lists wanghy@shanghaitech.edu.cn.",
+    "source_url": "https://sist.shanghaitech.edu.cn/wanghy/main.htm",
+    "source_note": "Official SIST faculty profile."
+  }
+]

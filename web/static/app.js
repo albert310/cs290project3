@@ -4,8 +4,12 @@ const formEl = document.querySelector("#composer");
 const inputEl = document.querySelector("#queryInput");
 const sendButton = document.querySelector("#sendButton");
 const clearButton = document.querySelector("#clearButton");
+const thinkingToggle = document.querySelector("#thinkingToggle");
+const verificationToggle = document.querySelector("#verificationToggle");
+const modeInputs = [thinkingToggle, verificationToggle];
 
 let busy = false;
+let scrollFrame = 0;
 
 function escapeHtml(value) {
   return value
@@ -21,11 +25,22 @@ function resizeInput() {
   inputEl.style.height = `${Math.min(inputEl.scrollHeight, 180)}px`;
 }
 
+function scrollToEnd() {
+  window.cancelAnimationFrame(scrollFrame);
+  scrollFrame = window.requestAnimationFrame(() => {
+    messagesEl.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "end" });
+  });
+}
+
 function setBusy(value) {
   busy = value;
   sendButton.disabled = value;
   sendButton.classList.toggle("loading", value);
+  appEl.classList.toggle("busy", value);
   inputEl.disabled = value;
+  modeInputs.forEach((input) => {
+    input.disabled = value;
+  });
 }
 
 function showConversation() {
@@ -43,8 +58,16 @@ function appendMessage(role, text) {
   item.appendChild(bubble);
 
   messagesEl.appendChild(item);
-  item.scrollIntoView({ behavior: "smooth", block: "end" });
+  scrollToEnd();
   return item;
+}
+
+function sourceLabel(hit) {
+  const title = hit.source_id.match(/title=([^;]+)/)?.[1]?.trim();
+  if (title) return title;
+  const path = hit.path || hit.source_id;
+  const clean = path.split(/[\\/]/).filter(Boolean).pop() || hit.source_id;
+  return clean.replace(/#chunk=\d+.*/, "");
 }
 
 function renderSources(parent, hits) {
@@ -60,9 +83,10 @@ function renderSources(parent, hits) {
 
     const summary = document.createElement("summary");
     summary.innerHTML = `
-      <span class="source-rank">[${index + 1}]</span>
-      <span class="source-path">${escapeHtml(hit.source_id)}</span>
+      <span class="source-rank">${index + 1}</span>
+      <span class="source-path">${escapeHtml(sourceLabel(hit))}</span>
     `;
+    summary.title = hit.source_id;
 
     const snippet = document.createElement("p");
     snippet.className = "source-snippet";
@@ -74,6 +98,7 @@ function renderSources(parent, hits) {
   });
 
   parent.appendChild(sources);
+  scrollToEnd();
 }
 
 function renderQueryKeywords(parent, keywords, searchQuery) {
@@ -105,13 +130,14 @@ function renderQueryKeywords(parent, keywords, searchQuery) {
   }
 
   parent.appendChild(detail);
+  scrollToEnd();
 }
 
 function renderRolloutStep(parent, payload) {
   const item = document.createElement("div");
   item.className = "rollout-step";
 
-  const action = payload.action === "search" ? "继续搜索" : "停止搜索";
+  const action = payload.action === "search" ? "继续搜索" : "证据足够";
   const step = payload.step ?? "";
   const keywords = payload.keywords?.length ? ` · ${payload.keywords.join(" / ")}` : "";
   const hits = payload.action === "search" ? ` · 新增 ${payload.new_hit_count ?? 0}/${payload.hit_count ?? 0}` : "";
@@ -121,6 +147,21 @@ function renderRolloutStep(parent, payload) {
   }
 
   parent.appendChild(item);
+  scrollToEnd();
+}
+
+function renderAnswerVerification(parent, payload) {
+  const item = document.createElement("div");
+  item.className = "verification-step";
+
+  const keywords = payload.keywords?.length ? ` · ${payload.keywords.join(" / ")}` : "";
+  const hits = ` · 新增 ${payload.new_hit_count ?? 0}/${payload.hit_count ?? 0}`;
+  item.textContent = `二次核验${keywords}${hits}`;
+  const queries = payload.search_queries?.length ? payload.search_queries.join("\n") : payload.search_query;
+  if (queries?.trim()) item.title = queries.trim();
+
+  parent.appendChild(item);
+  scrollToEnd();
 }
 
 function renderThink(parent, think) {
@@ -138,6 +179,7 @@ function renderThink(parent, think) {
   detail.appendChild(summary);
   detail.appendChild(body);
   parent.insertBefore(detail, parent.querySelector(".bubble"));
+  scrollToEnd();
 }
 
 function ensureThink(parent) {
@@ -158,6 +200,28 @@ function ensureThink(parent) {
     parent.insertBefore(detail, parent.querySelector(".bubble"));
   }
   return detail.querySelector("[data-role='think-body']");
+}
+
+function ensureStatus(parent) {
+  let status = parent.querySelector("[data-role='status']");
+  if (!status) {
+    status = document.createElement("div");
+    status.className = "status-line active";
+    status.dataset.role = "status";
+    parent.insertBefore(status, parent.querySelector(".bubble"));
+  }
+  return status;
+}
+
+function setStatus(parent, text, active = true) {
+  const status = ensureStatus(parent);
+  status.textContent = text;
+  status.classList.toggle("active", active);
+  scrollToEnd();
+}
+
+function clearStatus(parent) {
+  parent.querySelector("[data-role='status']")?.remove();
 }
 
 function parseSseBlock(block) {
@@ -181,11 +245,16 @@ function parseSseBlock(block) {
   }
 }
 
-async function streamAsk(query, onEvent) {
+async function streamAsk(query, options, onEvent) {
   const response = await fetch("/api/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, top_k: 8 }),
+    body: JSON.stringify({
+      query,
+      top_k: 8,
+      enable_thinking: options.enableThinking,
+      verify_answer: options.verifyAnswer,
+    }),
   });
 
   if (!response.ok) {
@@ -222,50 +291,72 @@ async function submitQuestion() {
   inputEl.value = "";
   resizeInput();
   appendMessage("user", query);
-  const assistantItem = appendMessage("assistant", "正在检索资料...");
+  const assistantItem = appendMessage("assistant", "");
   const bubble = assistantItem.querySelector(".bubble");
+  const options = {
+    enableThinking: thinkingToggle.checked,
+    verifyAnswer: verificationToggle.checked,
+  };
   let hits = [];
   let answerStarted = false;
 
   setBusy(true);
+  assistantItem.classList.add("streaming");
+  setStatus(assistantItem, "正在检索资料");
   try {
-    await streamAsk(query, (payload) => {
+    await streamAsk(query, options, (payload) => {
       if (payload.event === "query_keywords") {
+        setStatus(assistantItem, "已生成检索词");
         renderQueryKeywords(assistantItem, payload.keywords || [], payload.search_query);
       } else if (payload.event === "search_rollout_step") {
+        setStatus(assistantItem, "正在扩展搜索");
         renderRolloutStep(assistantItem, payload);
+      } else if (payload.event === "answer_verification") {
+        setStatus(assistantItem, "正在二次核验");
+        renderAnswerVerification(assistantItem, payload);
       } else if (payload.event === "sources") {
         hits = payload.hits || [];
-        bubble.textContent = "正在思考...";
+        setStatus(assistantItem, "正在阅读资料");
         renderSources(assistantItem, hits);
       } else if (payload.event === "think_delta") {
+        setStatus(assistantItem, "正在思考");
         const thinkBody = ensureThink(assistantItem);
         thinkBody.textContent += payload.delta || "";
+        scrollToEnd();
       } else if (payload.event === "answer_delta") {
         if (!answerStarted) {
           answerStarted = true;
+          clearStatus(assistantItem);
           bubble.textContent = "";
         }
         bubble.textContent += payload.delta || "";
+        scrollToEnd();
       } else if (payload.event === "done") {
+        assistantItem.classList.remove("streaming");
+        clearStatus(assistantItem);
         const meta = document.createElement("div");
         meta.className = "meta";
         const elapsed = payload.latency_sec;
-        meta.textContent = `检索 ${hits.length} 条资料${elapsed ? ` · ${elapsed.toFixed(1)}s` : ""}`;
+        const finish = payload.finish_reason ? ` · ${payload.finish_reason}` : "";
+        meta.textContent = `检索 ${hits.length} 条资料${elapsed ? ` · ${elapsed.toFixed(1)}s` : ""}${finish}`;
         assistantItem.appendChild(meta);
       } else if (payload.event === "error") {
         throw new Error(payload.error || "stream error");
       }
     });
-    if (!answerStarted && bubble.textContent === "正在思考...") {
+    if (!answerStarted && !bubble.textContent.trim()) {
+      clearStatus(assistantItem);
       bubble.textContent = "根据当前资料无法确认。";
     }
   } catch (error) {
+    assistantItem.classList.remove("streaming");
+    clearStatus(assistantItem);
     bubble.textContent = `请求失败：${error instanceof Error ? error.message : String(error)}`;
   } finally {
+    assistantItem.classList.remove("streaming");
     setBusy(false);
     inputEl.focus();
-    assistantItem.scrollIntoView({ behavior: "smooth", block: "end" });
+    scrollToEnd();
   }
 }
 

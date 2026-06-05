@@ -1,0 +1,27 @@
+{
+  "built_at": "2026-06-04T16:20:11Z",
+  "chunks_by_category": {
+    "sist_courses": 429,
+    "sist_degree_programs": 2103,
+    "sist_faculty": 4975,
+    "sist_news_events": 1045,
+    "sist_overview": 677,
+    "sist_research": 632,
+    "university_contact": 3,
+    "university_overview": 161
+  },
+  "chunks_by_tier": {
+    "live_official": 113,
+    "local_official_mirror": 9905,
+    "verified_seed": 7
+  },
+  "chunks_inserted": 10025,
+  "db_path": "/2022533109/chenyuhan/cs290project3/rag_data/db/shanghaitech_sist.sqlite",
+  "docs_seen": 2301,
+  "docs_without_chunks": 0,
+  "documents_inserted": 2069,
+  "duplicate_docs": 232,
+  "include_crawl": true,
+  "include_local": true,
+  "limit_docs": null
+}

@@ -22,6 +22,7 @@ OUTPUT_COLUMNS = [
     "llm_query_keyword_raw",
     "llm_query_keyword_error",
     "search_rollout",
+    "answer_verification",
     "gt_answer",
     "category",
     "question_type",
@@ -46,7 +47,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=8)
     parser.add_argument("--max-context-chars", type=int, default=7200)
     parser.add_argument("--max-tokens", type=int, default=None)
-    parser.add_argument("--llm-query-keywords", action="store_true")
+    parser.add_argument("--llm-query-keywords", dest="llm_query_keywords", action="store_true", default=True)
+    parser.add_argument("--no-llm-query-keywords", dest="llm_query_keywords", action="store_false")
     parser.add_argument("--query-keyword-max-tokens", type=int, default=256)
     parser.add_argument("--query-keyword-max-terms", type=int, default=12)
     parser.add_argument("--query-keyword-thinking", action="store_true")
@@ -55,6 +57,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--rollout-decision-max-tokens", type=int, default=512)
     parser.add_argument("--rollout-decision-thinking", action="store_true")
     parser.add_argument("--rollout-hits-per-step", type=int, default=5)
+    parser.add_argument("--verify-answer", action="store_true")
+    parser.add_argument("--verification-keyword-max-tokens", type=int, default=256)
+    parser.add_argument("--verification-keyword-max-terms", type=int, default=10)
+    parser.add_argument("--verification-keyword-thinking", action="store_true")
+    parser.add_argument("--verification-hits", type=int, default=6)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--offset", type=int, default=0)
     return parser.parse_args(argv)
@@ -71,6 +78,7 @@ def record_to_row(
     query_keyword_raw: str = "",
     query_keyword_error: str = "",
     search_rollout: Sequence[Mapping[str, Any]] = (),
+    answer_verification: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     eval_spec = item["eval"]
     is_correct = int(score_answer(answer, eval_spec))
@@ -82,6 +90,7 @@ def record_to_row(
         "llm_query_keyword_raw": query_keyword_raw,
         "llm_query_keyword_error": query_keyword_error,
         "search_rollout": as_json(list(search_rollout)),
+        "answer_verification": as_json(dict(answer_verification or {})),
         "gt_answer": item["gt_answer"],
         "category": item["category"],
         "question_type": item["question_type"],
@@ -128,6 +137,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         rollout_decision_max_tokens=args.rollout_decision_max_tokens,
         rollout_decision_enable_thinking=args.rollout_decision_thinking,
         rollout_hits_per_step=args.rollout_hits_per_step,
+        enable_answer_verification=args.verify_answer,
+        verification_keyword_max_tokens=args.verification_keyword_max_tokens,
+        verification_keyword_max_terms=args.verification_keyword_max_terms,
+        verification_keyword_enable_thinking=args.verification_keyword_thinking,
+        verification_hits=args.verification_hits,
     )
     rag = UnifiedRAG(config).open()
     output_path = Path(args.output_csv)
@@ -147,6 +161,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 query_keyword_raw = result.query_keyword_raw
                 query_keyword_error = result.query_keyword_error
                 search_rollout = result.search_rollout
+                answer_verification = result.answer_verification
             except Exception as exc:
                 answer = f"ERROR: {type(exc).__name__}: {exc}"
                 hits = []
@@ -155,6 +170,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 query_keyword_raw = ""
                 query_keyword_error = f"{type(exc).__name__}: {exc}"
                 search_rollout = []
+                answer_verification = {}
             latency = time.perf_counter() - started
             row = record_to_row(
                 item,
@@ -166,6 +182,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 query_keyword_raw=query_keyword_raw,
                 query_keyword_error=query_keyword_error,
                 search_rollout=search_rollout,
+                answer_verification=answer_verification,
             )
             correct += int(row["is_correct_after_opt"])
             rows.append(row)

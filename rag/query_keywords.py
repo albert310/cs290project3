@@ -9,6 +9,24 @@ from typing import Any, Iterable, List, Mapping, Optional
 from qwen_api import QwenClient
 
 
+GENERIC_QUERY_TERMS = (
+    "介绍一下",
+    "简单介绍",
+    "介绍",
+    "是什么",
+    "什么是",
+    "请问",
+    "告诉我",
+    "帮我查",
+    "查询",
+    "一下",
+    "about",
+    "tell me",
+    "introduce",
+    "introduction",
+)
+
+
 @dataclass(frozen=True)
 class QueryKeywordPlan:
     enabled: bool
@@ -27,9 +45,11 @@ SYSTEM_PROMPT = """你是一个RAG检索查询规划器。
 规则:
 1. 保留问题里的课程号、年份、教师姓名、学院名、专业名、研究中心名、英文术语。
 2. 可以补充中英文别名和同义词,例如 任课教师/Instructor, 研究方向/research interests。
-3. 关键词要短,不要输出完整句子。
-4. 不要猜答案,不要编造事实。
-5. 最多输出12个关键词。"""
+3. 如果用户问“介绍/简介/是什么/概况/overview”某个学院或机构,保留实体名,并补充概况类检索词,例如 About SIST、SIST overview、Vision and Mission、SIST AT A GLANCE。
+4. 删除“介绍一下”“是什么”“请问”“告诉我”“帮我查”等普通问句词,只保留可用于检索的实体、属性和同义词。
+5. 关键词要短,不要输出完整句子。
+6. 不要猜答案,不要编造事实。
+7. 最多输出12个关键词。"""
 
 
 def build_keyword_prompt(query: str) -> List[Mapping[str, str]]:
@@ -41,6 +61,12 @@ def build_keyword_prompt(query: str) -> List[Mapping[str, str]]:
 
 def normalize_keyword(value: Any) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
+    text = re.sub(r"\s+", " ", text).strip()
+    lower = text.lower()
+    for term in GENERIC_QUERY_TERMS:
+        if re.fullmatch(re.escape(term), lower, flags=re.IGNORECASE):
+            return ""
+        text = re.sub(re.escape(term), "", text, flags=re.IGNORECASE).strip()
     text = re.sub(r"\s+", " ", text).strip()
     text = text.strip(" ,，;；、。.!！?？:：\"'`[]{}()（）<>《》")
     return text
@@ -120,10 +146,7 @@ def parse_keywords(text: str, *, max_keywords: int = 12) -> List[str]:
 
 
 def make_search_query(query: str, keywords: Iterable[str]) -> str:
-    additions = [keyword for keyword in keywords if keyword and keyword not in query]
-    if not additions:
-        return query
-    return query + " " + " ".join(additions)
+    return " ".join(keyword for keyword in keywords if keyword)
 
 
 def generate_query_keywords(

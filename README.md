@@ -295,8 +295,34 @@ python3 scripts/eval_unified_rag.py \
   --max-search-steps 5
 ```
 
-`--llm-query-keywords` and `--iterative-search` are independent switches and can
-be enabled together.
+The third optional optimization is answer verification. The system first drafts
+an answer from the current evidence, asks local Qwen to extract verification
+keywords from that draft, retrieves again, and then generates the final answer
+after cross-checking the original and verification evidence. The verifier also
+searches a course-code-stripped version of the verification query so course
+codes do not block faculty profile or homepage evidence.
+
+```bash
+python3 scripts/run_unified_rag.py \
+  "CS282春季任课教师王浩的博士学位来自哪所大学、哪一年？" \
+  --verify-answer \
+  --show-verification \
+  --show-context
+```
+
+Evaluate the verification version:
+
+```bash
+python3 scripts/eval_unified_rag.py \
+  --output-csv eval/unified_rag_verify_answer.csv \
+  --top-k 8 \
+  --verify-answer
+```
+
+The output CSV includes `answer_verification`, which records the draft answer,
+verification keywords, verification search query, hit count, and number of new
+evidence chunks. `--llm-query-keywords`, `--iterative-search`, and
+`--verify-answer` are independent switches and can be enabled together.
 
 ## Web chat UI
 
@@ -312,6 +338,7 @@ is rendered into the answer bubble.
 python3 scripts/serve_web_chat.py --host 127.0.0.1 --port 7860
 python3 scripts/serve_web_chat.py --host 127.0.0.1 --port 7860 --llm-query-keywords
 python3 scripts/serve_web_chat.py --host 127.0.0.1 --port 7860 --iterative-search
+python3 scripts/serve_web_chat.py --host 127.0.0.1 --port 7860 --verify-answer
 ```
 
 Then open:

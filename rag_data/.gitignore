@@ -1,0 +1,7 @@
+raw/
+processed/
+db/*.sqlite
+db/*.sqlite-*
+reports/*.jsonl
+reports/*.csv
+!reports/*.md

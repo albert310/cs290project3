@@ -64,6 +64,20 @@ def _strip_open_tag(text: str) -> str:
     return text[:leading_len] + stripped[len(THINK_OPEN) :]
 
 
+def _strip_think_prefix(text: str) -> str:
+    stripped = text.lstrip()
+    leading_len = len(text) - len(stripped)
+    for prefix in THINK_PREFIXES:
+        if stripped.startswith(prefix):
+            return text[:leading_len] + stripped[len(prefix) :].lstrip()
+    return text
+
+
+def is_thinking_only(content: str) -> bool:
+    stripped = content.lstrip()
+    return any(stripped.startswith(prefix) for prefix in THINK_PREFIXES)
+
+
 def split_think(content: str) -> Tuple[str, str]:
     """Split a Qwen response into (think, answer).
 
@@ -75,10 +89,10 @@ def split_think(content: str) -> Tuple[str, str]:
 
     if THINK_CLOSE in content:
         think, answer = content.split(THINK_CLOSE, 1)
-        return _strip_open_tag(think).strip(), answer.strip()
+        return _strip_think_prefix(_strip_open_tag(think)).strip(), answer.strip()
     stripped = content.lstrip()
-    if stripped.startswith(THINK_OPEN):
-        return _strip_open_tag(content).strip(), ""
+    if is_thinking_only(content):
+        return _strip_think_prefix(_strip_open_tag(content)).strip(), ""
     return "", content.strip()
 
 

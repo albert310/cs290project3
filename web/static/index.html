@@ -4,25 +4,55 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SIST RAG Chat</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260604-ui5" />
   </head>
   <body>
     <main class="app-shell empty" id="app">
+      <header class="topbar">
+        <div class="brand" aria-label="SIST RAG">
+          <span class="brand-mark" aria-hidden="true">S</span>
+          <span class="brand-name">SIST RAG</span>
+        </div>
+        <button class="new-chat-button" type="button" id="clearButton" aria-label="开启新对话" title="开启新对话">
+          <span aria-hidden="true">＋</span>
+          <span>新对话</span>
+        </button>
+      </header>
+
       <section class="chat-stage" aria-live="polite">
+        <div class="empty-state" aria-hidden="true">
+          <p>SIST RAG</p>
+          <h1>ShanghaiTech Knowledge Chat</h1>
+        </div>
         <div class="messages" id="messages"></div>
       </section>
 
       <form class="composer" id="composer">
-        <button class="icon-button" type="button" id="clearButton" aria-label="清空对话" title="清空对话">
-          <span aria-hidden="true">＋</span>
-        </button>
-        <textarea id="queryInput" rows="1" placeholder="有问题，尽管问" autocomplete="off"></textarea>
-        <button class="send-button" type="submit" id="sendButton" aria-label="发送" title="发送">
-          <span class="send-arrow" aria-hidden="true">→</span>
-          <span class="send-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-        </button>
+        <div class="composer-tools" aria-label="模型选项">
+          <label class="mode-switch" title="深度思考">
+            <input class="mode-input" type="checkbox" id="thinkingToggle" checked />
+            <span class="switch-track" aria-hidden="true">
+              <span class="switch-thumb"></span>
+            </span>
+            <span class="mode-text">深度思考</span>
+          </label>
+          <label class="mode-switch" title="二次核验">
+            <input class="mode-input" type="checkbox" id="verificationToggle" checked />
+            <span class="switch-track" aria-hidden="true">
+              <span class="switch-thumb"></span>
+            </span>
+            <span class="mode-text">二次核验</span>
+          </label>
+        </div>
+        <div class="composer-main">
+          <textarea id="queryInput" rows="1" placeholder="有问题，尽管问" autocomplete="off"></textarea>
+          <button class="send-button" type="submit" id="sendButton" aria-label="发送" title="发送">
+            <span class="send-arrow" aria-hidden="true">→</span>
+            <span class="send-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          </button>
+        </div>
       </form>
     </main>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260604-ui5"></script>
   </body>
 </html>

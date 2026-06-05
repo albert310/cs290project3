@@ -18,7 +18,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=8)
     parser.add_argument("--max-context-chars", type=int, default=7200)
     parser.add_argument("--max-tokens", type=int, default=None)
-    parser.add_argument("--llm-query-keywords", action="store_true")
+    parser.add_argument("--llm-query-keywords", dest="llm_query_keywords", action="store_true", default=True)
+    parser.add_argument("--no-llm-query-keywords", dest="llm_query_keywords", action="store_false")
     parser.add_argument("--query-keyword-max-tokens", type=int, default=256)
     parser.add_argument("--query-keyword-max-terms", type=int, default=12)
     parser.add_argument("--query-keyword-thinking", action="store_true")
@@ -27,9 +28,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--rollout-decision-max-tokens", type=int, default=512)
     parser.add_argument("--rollout-decision-thinking", action="store_true")
     parser.add_argument("--rollout-hits-per-step", type=int, default=5)
+    parser.add_argument("--verify-answer", action="store_true")
+    parser.add_argument("--verification-keyword-max-tokens", type=int, default=256)
+    parser.add_argument("--verification-keyword-max-terms", type=int, default=10)
+    parser.add_argument("--verification-keyword-thinking", action="store_true")
+    parser.add_argument("--verification-hits", type=int, default=6)
     parser.add_argument("--show-context", action="store_true")
     parser.add_argument("--show-keywords", action="store_true")
     parser.add_argument("--show-rollout", action="store_true")
+    parser.add_argument("--show-verification", action="store_true")
     parser.add_argument("--show-think", action="store_true")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     return parser.parse_args(argv)
@@ -51,6 +58,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         rollout_decision_max_tokens=args.rollout_decision_max_tokens,
         rollout_decision_enable_thinking=args.rollout_decision_thinking,
         rollout_hits_per_step=args.rollout_hits_per_step,
+        enable_answer_verification=args.verify_answer,
+        verification_keyword_max_tokens=args.verification_keyword_max_tokens,
+        verification_keyword_max_terms=args.verification_keyword_max_terms,
+        verification_keyword_enable_thinking=args.verification_keyword_thinking,
+        verification_hits=args.verification_hits,
     )
     rag = UnifiedRAG(config).open()
     try:
@@ -70,6 +82,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.show_rollout:
             print("--- search rollout ---")
             print(json.dumps(result.search_rollout, ensure_ascii=False, indent=2))
+            print()
+
+        if args.show_verification:
+            print("--- answer verification ---")
+            print(json.dumps(result.answer_verification, ensure_ascii=False, indent=2))
             print()
 
         print(result.answer)

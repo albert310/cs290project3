@@ -1,0 +1,74 @@
+{
+  "allowed_hosts": [
+    "www.shanghaitech.edu.cn",
+    "shanghaitech.edu.cn",
+    "sist.shanghaitech.edu.cn",
+    "faculty.sist.shanghaitech.edu.cn",
+    "ssist.shanghaitech.edu.cn"
+  ],
+  "allowed_host_suffixes": [
+    ".sist.shanghaitech.edu.cn"
+  ],
+  "seeds": [
+    {
+      "url": "https://www.shanghaitech.edu.cn/en/997/main.psp",
+      "category": "university_overview",
+      "priority": 1.0,
+      "max_depth": 1
+    },
+    {
+      "url": "https://www.shanghaitech.edu.cn/en/1059/list.psp",
+      "category": "university_contact",
+      "priority": 1.0,
+      "max_depth": 0
+    },
+    {
+      "url": "https://www.shanghaitech.edu.cn/en/1000/main.psp",
+      "category": "university_faculty",
+      "priority": 0.9,
+      "max_depth": 1
+    },
+    {
+      "url": "https://www.shanghaitech.edu.cn/en/research/main.psp",
+      "category": "university_research",
+      "priority": 0.85,
+      "max_depth": 1
+    },
+    {
+      "url": "https://sist.shanghaitech.edu.cn/",
+      "category": "sist_overview",
+      "priority": 1.0,
+      "max_depth": 1
+    },
+    {
+      "url": "https://sist.shanghaitech.edu.cn/sist_en/",
+      "category": "sist_overview",
+      "priority": 1.0,
+      "max_depth": 1
+    },
+    {
+      "url": "https://sist.shanghaitech.edu.cn/pyfa/list.htm",
+      "category": "sist_degree_programs",
+      "priority": 1.0,
+      "max_depth": 1
+    },
+    {
+      "url": "https://faculty.sist.shanghaitech.edu.cn/office/Academics/Courses/SIST_2024-2025_Courses.htm",
+      "category": "sist_courses",
+      "priority": 1.0,
+      "max_depth": 0
+    },
+    {
+      "url": "https://faculty.sist.shanghaitech.edu.cn/office/Academics/Undergraduate/Degree%20Programmes/2024%20Bachelor%20Degree%20Programs%20in%20CS.htm",
+      "category": "sist_degree_programs",
+      "priority": 0.95,
+      "max_depth": 0
+    },
+    {
+      "url": "https://faculty.sist.shanghaitech.edu.cn/office/Academics/Undergraduate/Degree%20Programmes/2024%20Bachelor%20Degree%20Programs%20in%20EE.htm",
+      "category": "sist_degree_programs",
+      "priority": 0.95,
+      "max_depth": 0
+    }
+  ]
+}

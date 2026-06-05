@@ -1,0 +1,10 @@
+{
+  "failed": 8,
+  "fetched": 41,
+  "manifest_path": "/2022533109/chenyuhan/cs290project3/rag_data/processed/official_crawl_manifest.jsonl",
+  "raw_dir": "/2022533109/chenyuhan/cs290project3/rag_data/raw/official_pages",
+  "records": 49,
+  "seeds_path": "/2022533109/chenyuhan/cs290project3/rag_data/config/seeds.json",
+  "seen": 49,
+  "skipped": 0
+}

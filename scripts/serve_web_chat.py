@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import json
 import mimetypes
 import socket
@@ -40,6 +41,40 @@ def json_bytes(payload: Dict[str, Any]) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
+def optional_bool(payload: Dict[str, Any], key: str) -> bool | None:
+    if key not in payload:
+        return None
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError(f"{key} must be boolean")
+
+
+@contextmanager
+def temporary_config_overrides(rag: Any, **overrides: bool | None):
+    config = getattr(rag, "config", None)
+    original: Dict[str, Any] = {}
+    if config is not None:
+        for key, value in overrides.items():
+            if value is None or not hasattr(config, key):
+                continue
+            original[key] = getattr(config, key)
+            setattr(config, key, value)
+    try:
+        yield
+    finally:
+        for key, value in original.items():
+            setattr(config, key, value)
+
+
 class ChatHandler(BaseHTTPRequestHandler):
     server_version = "SISTRAG/0.1"
 
@@ -77,6 +112,8 @@ class ChatHandler(BaseHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8")) if body else {}
             query = str(payload.get("query") or "").strip()
             top_k = int(payload.get("top_k") or RAG_INSTANCE.config.top_k)
+            enable_thinking = optional_bool(payload, "enable_thinking")
+            verify_answer = optional_bool(payload, "verify_answer")
         except Exception as exc:
             self.send_json({"error": f"invalid request: {exc}"}, status=HTTPStatus.BAD_REQUEST)
             return
@@ -88,7 +125,12 @@ class ChatHandler(BaseHTTPRequestHandler):
         started = time.perf_counter()
         try:
             with RAG_LOCK:
-                result = RAG_INSTANCE.answer(query, top_k=top_k)
+                with temporary_config_overrides(
+                    RAG_INSTANCE,
+                    enable_thinking=enable_thinking,
+                    enable_answer_verification=verify_answer,
+                ):
+                    result = RAG_INSTANCE.answer(query, top_k=top_k)
             latency = time.perf_counter() - started
             self.send_json(
                 {
@@ -98,9 +140,12 @@ class ChatHandler(BaseHTTPRequestHandler):
                     "search_query": result.search_query or result.query,
                     "query_keyword_error": result.query_keyword_error,
                     "search_rollout": result.search_rollout,
+                    "answer_verification": result.answer_verification,
                     "hits": [hit.to_dict() for hit in result.hits],
                     "latency_sec": latency,
                     "usage": result.usage,
+                    "enable_thinking": enable_thinking,
+                    "verify_answer": verify_answer,
                 }
             )
         except Exception as exc:
@@ -118,6 +163,8 @@ class ChatHandler(BaseHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8")) if body else {}
             query = str(payload.get("query") or "").strip()
             top_k = int(payload.get("top_k") or RAG_INSTANCE.config.top_k)
+            enable_thinking = optional_bool(payload, "enable_thinking")
+            verify_answer = optional_bool(payload, "verify_answer")
         except Exception as exc:
             self.send_json({"error": f"invalid request: {exc}"}, status=HTTPStatus.BAD_REQUEST)
             return
@@ -135,10 +182,15 @@ class ChatHandler(BaseHTTPRequestHandler):
         started = time.perf_counter()
         try:
             with RAG_LOCK:
-                for event in RAG_INSTANCE.stream(query, top_k=top_k):
-                    if event.get("event") == "done":
-                        event["latency_sec"] = time.perf_counter() - started
-                    self.send_sse(str(event.get("event") or "message"), event)
+                with temporary_config_overrides(
+                    RAG_INSTANCE,
+                    enable_thinking=enable_thinking,
+                    enable_answer_verification=verify_answer,
+                ):
+                    for event in RAG_INSTANCE.stream(query, top_k=top_k):
+                        if event.get("event") == "done":
+                            event["latency_sec"] = time.perf_counter() - started
+                        self.send_sse(str(event.get("event") or "message"), event)
         except BrokenPipeError:
             return
         except Exception as exc:
@@ -196,7 +248,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=None)
     parser.add_argument("--max-context-chars", type=int, default=None)
     parser.add_argument("--max-tokens", type=int, default=None)
-    parser.add_argument("--llm-query-keywords", action="store_true")
+    parser.add_argument("--llm-query-keywords", dest="llm_query_keywords", action="store_true", default=True)
+    parser.add_argument("--no-llm-query-keywords", dest="llm_query_keywords", action="store_false")
     parser.add_argument("--query-keyword-max-tokens", type=int, default=256)
     parser.add_argument("--query-keyword-max-terms", type=int, default=12)
     parser.add_argument("--query-keyword-thinking", action="store_true")
@@ -205,6 +258,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--rollout-decision-max-tokens", type=int, default=512)
     parser.add_argument("--rollout-decision-thinking", action="store_true")
     parser.add_argument("--rollout-hits-per-step", type=int, default=5)
+    parser.add_argument("--verify-answer", action="store_true")
+    parser.add_argument("--verification-keyword-max-tokens", type=int, default=256)
+    parser.add_argument("--verification-keyword-max-terms", type=int, default=10)
+    parser.add_argument("--verification-keyword-thinking", action="store_true")
+    parser.add_argument("--verification-hits", type=int, default=6)
     parser.add_argument("--rebuild-index", action="store_true")
     return parser.parse_args(argv)
 
@@ -237,6 +295,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             rollout_decision_max_tokens=args.rollout_decision_max_tokens,
             rollout_decision_enable_thinking=args.rollout_decision_thinking,
             rollout_hits_per_step=args.rollout_hits_per_step,
+            enable_answer_verification=args.verify_answer,
+            verification_keyword_max_tokens=args.verification_keyword_max_tokens,
+            verification_keyword_max_terms=args.verification_keyword_max_terms,
+            verification_keyword_enable_thinking=args.verification_keyword_thinking,
+            verification_hits=args.verification_hits,
         )
         RAG_INSTANCE = UnifiedRAG(config).open()
     server = ThreadingHTTPServer((args.host, port), ChatHandler)

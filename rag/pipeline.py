@@ -37,6 +37,7 @@ class RAGAnswer:
     query_keyword_raw: str = ""
     query_keyword_error: str = ""
     search_rollout: List[Dict[str, Any]] = field(default_factory=list)
+    answer_verification: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -51,6 +52,7 @@ class RAGAnswer:
             "query_keyword_raw": self.query_keyword_raw,
             "query_keyword_error": self.query_keyword_error,
             "search_rollout": self.search_rollout,
+            "answer_verification": self.answer_verification,
         }
 
 

@@ -1,5 +1,6 @@
 """Baseline RAG pipeline for Project 3."""
 
+from .answer_verification import AnswerVerification, generate_answer_verification
 from .pipeline import BaselineRAG, RAGAnswer, RAGConfig
 from .query_keywords import QueryKeywordPlan, generate_query_keywords, parse_keywords
 from .search_rollout import SearchRolloutDecision, SearchRolloutStep
@@ -11,6 +12,8 @@ __all__ = [
     "BaselineRAG",
     "RAGAnswer",
     "RAGConfig",
+    "AnswerVerification",
+    "generate_answer_verification",
     "QueryKeywordPlan",
     "generate_query_keywords",
     "parse_keywords",
