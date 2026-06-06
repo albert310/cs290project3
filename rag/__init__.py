@@ -8,6 +8,15 @@ from .text_index import TextChunk, TextFTSIndex, TextSearchHit
 from .unified_index import UnifiedRAGIndex, UnifiedSearchHit
 from .unified_pipeline import UnifiedRAG, UnifiedRAGConfig
 
+
+def __getattr__(name: str):
+    if name == "TantivyRAGIndex":
+        from .tantivy_index import TantivyRAGIndex
+
+        return TantivyRAGIndex
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "BaselineRAG",
     "RAGAnswer",
@@ -20,6 +29,7 @@ __all__ = [
     "SearchRolloutDecision",
     "SearchRolloutStep",
     "TextChunk",
+    "TantivyRAGIndex",
     "TextFTSIndex",
     "TextSearchHit",
     "UnifiedRAG",

@@ -243,6 +243,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--rag-mode", choices=("unified", "baseline"), default="unified")
     parser.add_argument("--db-path", default="data/rag/knowledge.sqlite")
+    parser.add_argument("--retrieval-backend", choices=("sqlite", "tantivy"), default="sqlite")
+    parser.add_argument("--tantivy-index-dir", default=".cache/tantivy_rag")
+    parser.add_argument("--tantivy-candidates", type=int, default=240)
     parser.add_argument("--texts-dir", default="data/sist/texts")
     parser.add_argument("--cache-path", default=".cache/rag_baseline_texts.sqlite")
     parser.add_argument("--top-k", type=int, default=None)
@@ -276,15 +279,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             texts_dir=Path(args.texts_dir),
             cache_path=Path(args.cache_path),
             top_k=args.top_k or 6,
-            max_context_chars=args.max_context_chars or 5600,
+            max_context_chars=args.max_context_chars if args.max_context_chars is not None else 5600,
             max_tokens=args.max_tokens,
         )
         RAG_INSTANCE = BaselineRAG(config).open(rebuild_index=args.rebuild_index)
     else:
         config = UnifiedRAGConfig(
             db_path=Path(args.db_path),
+            retrieval_backend=args.retrieval_backend,
+            tantivy_index_dir=Path(args.tantivy_index_dir),
+            tantivy_candidates=args.tantivy_candidates,
             top_k=args.top_k or 8,
-            max_context_chars=args.max_context_chars or 7200,
+            max_context_chars=args.max_context_chars if args.max_context_chars is not None else 7200,
             max_tokens=args.max_tokens,
             enable_llm_query_keywords=args.llm_query_keywords,
             query_keyword_max_tokens=args.query_keyword_max_tokens,

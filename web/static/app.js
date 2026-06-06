@@ -251,7 +251,7 @@ async function streamAsk(query, options, onEvent) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       query,
-      top_k: 8,
+      top_k: 20,
       enable_thinking: options.enableThinking,
       verify_answer: options.verifyAnswer,
     }),

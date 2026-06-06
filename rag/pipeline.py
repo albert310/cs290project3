@@ -17,7 +17,7 @@ class RAGConfig:
     chunk_chars: int = 900
     overlap_chars: int = 120
     min_chars: int = 80
-    max_context_chars: int = 5600
+    max_context_chars: Optional[int] = 5600
     max_tokens: Optional[int] = None
     temperature: float = 0.0
     enable_thinking: bool = True
@@ -56,30 +56,38 @@ class RAGAnswer:
         }
 
 
-def trim_text(text: str, max_chars: int) -> str:
+def trim_text(text: str, max_chars: Optional[int]) -> str:
+    if max_chars is None or max_chars <= 0:
+        return text
     if len(text) <= max_chars:
         return text
+    if max_chars <= 3:
+        return text[:max_chars]
     return text[: max_chars - 3].rstrip() + "..."
 
 
-def build_context(hits: List[TextSearchHit], *, max_context_chars: int) -> str:
+def build_context(hits: List[TextSearchHit], *, max_context_chars: Optional[int]) -> str:
     parts: List[str] = []
     used = 0
+    has_limit = max_context_chars is not None and max_context_chars > 0
     for index, hit in enumerate(hits, start=1):
         header = f"[{index}] source={hit.source_id}\n"
-        budget = max_context_chars - used - len(header)
-        if budget <= 0:
-            break
-        body = trim_text(hit.text.strip(), max(200, budget))
+        if has_limit:
+            budget = max_context_chars - used - len(header)
+            if budget <= 0:
+                break
+            body = trim_text(hit.text.strip(), max(200, budget))
+        else:
+            body = hit.text.strip()
         part = header + body
         parts.append(part)
         used += len(part) + 2
-        if used >= max_context_chars:
+        if has_limit and used >= max_context_chars:
             break
     return "\n\n".join(parts)
 
 
-def build_prompt(query: str, hits: List[TextSearchHit], *, max_context_chars: int) -> str:
+def build_prompt(query: str, hits: List[TextSearchHit], *, max_context_chars: Optional[int]) -> str:
     context = build_context(hits, max_context_chars=max_context_chars)
     if not context:
         context = "（没有检索到可用资料）"

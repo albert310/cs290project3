@@ -19,6 +19,7 @@ from .search_rollout import (
 from .unified_index import UnifiedRAGIndex, UnifiedSearchHit
 
 
+DEFAULT_TANTIVY_INDEX_DIR = Path(".cache/tantivy_rag")
 COURSE_CODE_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z]{2,}\d{2,4}[A-Z]?(?![A-Za-z0-9])", flags=re.IGNORECASE)
 ENGLISH_NAME_RE = re.compile(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}\b")
 CJK_NAME_RE = re.compile(r"[\u4e00-\u9fff]{2,4}")
@@ -117,8 +118,11 @@ CONTEXT_ALIASES = {
 @dataclass
 class UnifiedRAGConfig:
     db_path: Path = Path("data/rag/knowledge.sqlite")
+    retrieval_backend: str = "sqlite"
+    tantivy_index_dir: Path = DEFAULT_TANTIVY_INDEX_DIR
+    tantivy_candidates: int = 240
     top_k: int = 8
-    max_context_chars: int = 7200
+    max_context_chars: Optional[int] = 7200
     max_tokens: Optional[int] = None
     temperature: float = 0.0
     enable_thinking: bool = True
@@ -138,9 +142,10 @@ class UnifiedRAGConfig:
     verification_hits: int = 6
 
 
-def build_unified_context(hits: List[UnifiedSearchHit], *, max_context_chars: int) -> str:
+def build_unified_context(hits: List[UnifiedSearchHit], *, max_context_chars: Optional[int]) -> str:
     parts: List[str] = []
     used = 0
+    has_limit = max_context_chars is not None and max_context_chars > 0
     for index, hit in enumerate(hits, start=1):
         meta = []
         if hit.title:
@@ -154,14 +159,17 @@ def build_unified_context(hits: List[UnifiedSearchHit], *, max_context_chars: in
             meta.append(f"url={hit.url}")
         meta.append(f"path={hit.path}")
         header = f"[{index}] " + " | ".join(meta) + "\n"
-        budget = max_context_chars - used - len(header)
-        if budget <= 0:
-            break
-        body = trim_text(enrich_context_aliases(hit.text.strip()), max(260, budget))
+        if has_limit:
+            budget = max_context_chars - used - len(header)
+            if budget <= 0:
+                break
+            body = trim_text(enrich_context_aliases(hit.text.strip()), max(260, budget))
+        else:
+            body = enrich_context_aliases(hit.text.strip())
         part = header + body
         parts.append(part)
         used += len(part) + 2
-        if used >= max_context_chars:
+        if has_limit and used >= max_context_chars:
             break
     return "\n\n".join(parts)
 
@@ -172,7 +180,7 @@ def enrich_context_aliases(text: str) -> str:
     return text
 
 
-def build_unified_prompt(query: str, hits: List[UnifiedSearchHit], *, max_context_chars: int) -> str:
+def build_unified_prompt(query: str, hits: List[UnifiedSearchHit], *, max_context_chars: Optional[int]) -> str:
     context = build_unified_context(hits, max_context_chars=max_context_chars)
     if not context:
         context = "（没有检索到可用资料）"
@@ -204,7 +212,7 @@ def build_verified_prompt(
     original_hits: List[UnifiedSearchHit],
     verified_hits: List[UnifiedSearchHit],
     *,
-    max_context_chars: int,
+    max_context_chars: Optional[int],
 ) -> str:
     all_hits = verified_hits + original_hits
     context = build_unified_context(all_hits, max_context_chars=max_context_chars)
@@ -333,13 +341,33 @@ class UnifiedRAG:
         self.config = config or UnifiedRAGConfig()
         self.client = client or QwenClient()
         self.index = UnifiedRAGIndex(self.config.db_path)
+        self.tantivy_index: Any | None = None
 
     def open(self) -> "UnifiedRAG":
-        self.index.open()
+        if self.config.retrieval_backend == "tantivy":
+            from .tantivy_index import TantivyRAGIndex
+
+            self.tantivy_index = TantivyRAGIndex(
+                self.config.db_path,
+                self.config.tantivy_index_dir,
+                candidate_limit=self.config.tantivy_candidates,
+            ).open()
+        else:
+            self.index.open()
         return self
 
     def close(self) -> None:
         self.index.close()
+        if self.tantivy_index is not None:
+            self.tantivy_index.close()
+            self.tantivy_index = None
+
+    def _search_backend(self, query: str, *, top_k: int) -> List[UnifiedSearchHit]:
+        if self.config.retrieval_backend == "tantivy":
+            if self.tantivy_index is None:
+                raise RuntimeError("Tantivy retriever is not open.")
+            return self.tantivy_index.search(query, top_k=top_k)
+        return self.index.search(query, top_k=top_k)
 
     def plan_query(self, query: str) -> QueryKeywordPlan:
         if not self.config.enable_llm_query_keywords:
@@ -372,7 +400,7 @@ class UnifiedRAG:
             search_query = self.plan_query(query).search_query
         if not search_query.strip():
             return []
-        return self.index.search(search_query, top_k=target_k)
+        return self._search_backend(search_query, top_k=target_k)
 
     def _append_new_hits(
         self,
@@ -442,7 +470,7 @@ class UnifiedRAG:
                 continue
             seen_queries.add(key)
             actual_search_queries.append(search_query)
-            candidates.extend(self.index.search(search_query, top_k=target_k))
+            candidates.extend(self._search_backend(search_query, top_k=target_k))
 
         _, added = self._append_new_hits(hits, candidates, limit=self.config.verification_hits)
         verification = AnswerVerification(
@@ -520,7 +548,7 @@ class UnifiedRAG:
                 break
 
             previous_searches.append(search_query)
-            new_hits = self.index.search(search_query, top_k=max(target_k, self.config.rollout_hits_per_step))
+            new_hits = self._search_backend(search_query, top_k=max(target_k, self.config.rollout_hits_per_step))
             accumulated, added = self._append_new_hits(
                 accumulated,
                 new_hits,
@@ -554,12 +582,13 @@ class UnifiedRAG:
             result_think = ""
             usage = None
         else:
-            draft_enable_thinking = self.config.enable_thinking and not self.config.enable_answer_verification
             result = self.client.chat(
                 prompt,
                 max_tokens=self.config.max_tokens,
                 temperature=self.config.temperature,
-                extra_body={"chat_template_kwargs": {"enable_thinking": draft_enable_thinking}},
+                # Long retrieval contexts make Qwen's internal thinking spend the
+                # whole generation budget before it reaches the final answer.
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
             )
             draft_answer = chat_visible_answer(result, query)
             result_raw = result.raw
@@ -586,7 +615,9 @@ class UnifiedRAG:
                 verified_prompt,
                 max_tokens=self.config.max_tokens,
                 temperature=self.config.temperature,
-                extra_body={"chat_template_kwargs": {"enable_thinking": self.config.enable_thinking}},
+                # The verified prompt already contains the draft and cross-check evidence;
+                # Qwen's internal thinking can loop on this long, repetitive context.
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
             )
             answer = chat_visible_answer(verified_result, query)
             result_raw = verified_result.raw
@@ -679,7 +710,9 @@ class UnifiedRAG:
             prompt,
             max_tokens=self.config.max_tokens,
             temperature=self.config.temperature,
-            extra_body={"chat_template_kwargs": {"enable_thinking": self.config.enable_thinking}},
+            # Long retrieval contexts make Qwen's internal thinking spend the
+            # whole generation budget before it reaches the final answer.
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
         ):
             if event.kind == "think" and event.delta:
                 yield {"event": "think_delta", "delta": event.delta}

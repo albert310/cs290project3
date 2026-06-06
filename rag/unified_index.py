@@ -127,6 +127,10 @@ def _query_course_codes(query: str) -> List[str]:
     return sorted({match.group(0).upper() for match in COURSE_CODE_RE.finditer(query)})
 
 
+def _contains_course_code(text: str, code: str) -> bool:
+    return bool(re.search(rf"(?<![A-Z0-9]){re.escape(code.upper())}(?![A-Z0-9])", text.upper()))
+
+
 def _query_years(query: str) -> List[str]:
     return sorted({match.group(1) for match in YEAR_RE.finditer(query)})
 
@@ -452,7 +456,7 @@ class UnifiedRAGIndex:
             candidates = {
                 chunk_id: (row, raw_score)
                 for chunk_id, (row, raw_score) in candidates.items()
-                if any(code in f"{row['title']}\n{row['text']}".upper() for code in course_codes)
+                if any(_contains_course_code(f"{row['title']}\n{row['text']}", code) for code in course_codes)
             }
             if not candidates:
                 return []
@@ -673,7 +677,7 @@ class UnifiedRAGIndex:
                 score += 35.0
             if f"课程代码: {code}" in text or f"# {code}" in text:
                 score += 45.0
-            elif code in haystack.upper():
+            elif _contains_course_code(haystack, code):
                 score += 18.0
             else:
                 score -= 30.0
