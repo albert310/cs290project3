@@ -1,11 +1,123 @@
 # cs290project3
 cs290project3
 
+## Installation and quick start
+
+This repository does not vendor data, model weights, Python virtual
+environments, logs, or local indexes. The ignored local paths are `data/`,
+`models/`, `hf_cache/`, `.cache/`, `logs/`, and `run/`.
+
+The core RAG code is plain Python and uses the standard library plus Tantivy for
+the current web retrieval backend. Use Python 3.8 or newer.
+
+### 1. Create the Python environment
+
+```bash
+cd cs290project3
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install tantivy
+```
+
+Optional crawler/data-refresh scripts under `rag_data/scripts/` also use
+`requests` and `beautifulsoup4`:
+
+```bash
+python -m pip install requests beautifulsoup4
+```
+
+### 2. Restore the local data
+
+For the fastest runnable setup, place the prepared RAG archive under `data/`
+and extract it so `data/rag/knowledge.sqlite` exists:
+
+```bash
+mkdir -p data
+unzip data/rag.zip -d data/
+test -f data/rag/knowledge.sqlite
+```
+
+If you are rebuilding from the raw course/crawl archives instead, place and
+extract the archives, then rebuild the SQLite database:
+
+```bash
+mkdir -p data/old
+unzip data/old/sist.zip -d data/old/
+unzip data/old/shanghaitech_data.zip -d data/old/
+python3 scripts/build_rag_database.py
+```
+
+### 3. Build or restore the Tantivy index
+
+The web demo currently uses Tantivy by default in our local run. The index is
+stored outside Git under `.cache/tantivy_rag/`.
+
+```bash
+python3 scripts/experimental_tantivy_search.py --build
+python3 scripts/experimental_tantivy_search.py "介绍一下CS290S" --top-k 5
+```
+
+### 4. Start the local Qwen server
+
+The RAG scripts expect an OpenAI-compatible Qwen endpoint at
+`http://127.0.0.1:8000/v1` with model name `qwen3.6-27b`. If you already have
+the vLLM environment and model weights, a typical launch command is:
+
+```bash
+python -u -m vllm.entrypoints.openai.api_server \
+  --model models/Qwen3.6-27B \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --served-model-name qwen3.6-27b \
+  --gpu-memory-utilization 0.95 \
+  --trust-remote-code \
+  --dtype bfloat16 \
+  --max-model-len 32768
+```
+
+The client can be pointed at a different compatible endpoint with:
+
+```bash
+export QWEN_BASE_URL=http://127.0.0.1:8000
+export QWEN_MODEL=qwen3.6-27b
+```
+
+### 5. Run the web demo
+
+```bash
+python3 scripts/serve_web_chat.py \
+  --host 127.0.0.1 \
+  --port 7860 \
+  --db-path data/rag/knowledge.sqlite \
+  --retrieval-backend tantivy \
+  --tantivy-index-dir .cache/tantivy_rag \
+  --tantivy-candidates 240 \
+  --top-k 20 \
+  --max-context-chars 9000 \
+  --max-tokens 1600 \
+  --verify-answer
+```
+
+Then open:
+
+```text
+http://127.0.0.1:7860
+```
+
+Quick command-line smoke tests:
+
+```bash
+python3 scripts/demo_qwen_api.py --stream
+python3 scripts/run_unified_rag.py "介绍一下CS290S" --verify-answer --show-context
+```
+
 ## Provided SIST dataset
 
-The course dataset archive is kept under `data/sist.zip` and extracted to
-`data/sist/`. The whole `data/` directory is ignored by Git because raw data
-must not be included in the final submission zip.
+The course dataset archive is distributed outside Git and should be extracted
+so the dataset is available as `data/sist/` (for example, from
+`data/sist.zip` or `data/old/sist.zip`). The whole `data/` directory is ignored
+by Git because raw data must not be included in the final submission zip.
 
 Dataset layout:
 
