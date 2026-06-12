@@ -163,7 +163,7 @@ class UnifiedRAGConfig:
     tantivy_candidates: int = 240
     lexical_candidates: int = 240
     structured_candidates: int = 160
-    enable_dense_retrieval: bool = False
+    enable_dense_retrieval: bool = True
     dense_index_dir: Path = DEFAULT_DENSE_INDEX_DIR
     dense_candidates: int = 160
     dense_embedding_base_url: str = "http://127.0.0.1:8001"

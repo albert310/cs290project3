@@ -325,7 +325,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--structured-candidates", type=int, default=160)
     parser.add_argument("--dense-retrieval", dest="dense_retrieval", action="store_true")
     parser.add_argument("--no-dense-retrieval", dest="dense_retrieval", action="store_false")
-    parser.set_defaults(dense_retrieval=False)
+    parser.set_defaults(dense_retrieval=True)
     parser.add_argument("--dense-index-dir", default=".cache/dense_rag")
     parser.add_argument("--dense-candidates", type=int, default=160)
     parser.add_argument("--embedding-base-url", default="http://127.0.0.1:8001")
