@@ -21,6 +21,7 @@ OUTPUT_COLUMNS = [
     "llm_query_keywords",
     "llm_query_keyword_raw",
     "llm_query_keyword_error",
+    "llm_rerank",
     "search_rollout",
     "answer_verification",
     "gt_answer",
@@ -44,15 +45,42 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--testset", default="eval/testset_web_verified.jsonl")
     parser.add_argument("--output-csv", default="eval/unified_rag_after_opt.csv")
     parser.add_argument("--db-path", default="data/rag/knowledge.sqlite")
+    parser.add_argument("--retrieval-backend", choices=("sqlite", "tantivy"), default="sqlite")
+    parser.add_argument("--tantivy-index-dir", default=".cache/tantivy_rag")
+    parser.add_argument("--tantivy-candidates", type=int, default=240)
+    parser.add_argument("--lexical-candidates", type=int, default=240)
+    parser.add_argument("--structured-candidates", type=int, default=160)
+    parser.add_argument("--dense-retrieval", dest="dense_retrieval", action="store_true")
+    parser.add_argument("--no-dense-retrieval", dest="dense_retrieval", action="store_false")
+    parser.set_defaults(dense_retrieval=False)
+    parser.add_argument("--dense-index-dir", default=".cache/dense_rag")
+    parser.add_argument("--dense-candidates", type=int, default=160)
+    parser.add_argument("--embedding-base-url", default="http://127.0.0.1:8001")
+    parser.add_argument("--embedding-model", default="qwen3-embedding-4b")
+    parser.add_argument("--lexical-rrf-weight", type=float, default=1.0)
+    parser.add_argument("--structured-rrf-weight", type=float, default=1.15)
+    parser.add_argument("--dense-rrf-weight", type=float, default=1.0)
+    parser.add_argument("--hybrid-rrf-k", type=int, default=60)
+    parser.add_argument("--neighbor-expansion-window", type=int, default=1)
+    parser.add_argument("--neighbor-expansion-limit", type=int, default=48)
     parser.add_argument("--top-k", type=int, default=8)
     parser.add_argument("--max-context-chars", type=int, default=7200)
     parser.add_argument("--max-tokens", type=int, default=None)
+    parser.add_argument("--thinking", dest="enable_thinking", action="store_true", default=True)
+    parser.add_argument("--no-thinking", dest="enable_thinking", action="store_false")
     parser.add_argument("--llm-query-keywords", dest="llm_query_keywords", action="store_true", default=True)
     parser.add_argument("--no-llm-query-keywords", dest="llm_query_keywords", action="store_false")
     parser.add_argument("--query-keyword-max-tokens", type=int, default=256)
     parser.add_argument("--query-keyword-max-terms", type=int, default=12)
     parser.add_argument("--query-keyword-thinking", action="store_true")
-    parser.add_argument("--iterative-search", action="store_true")
+    parser.add_argument("--llm-rerank", dest="llm_rerank", action="store_true", default=True)
+    parser.add_argument("--no-llm-rerank", dest="llm_rerank", action="store_false")
+    parser.add_argument("--llm-rerank-candidates", type=int, default=64)
+    parser.add_argument("--llm-rerank-max-tokens", type=int, default=768)
+    parser.add_argument("--llm-rerank-thinking", action="store_true")
+    parser.add_argument("--llm-rerank-chars-per-hit", type=int, default=500)
+    parser.add_argument("--iterative-search", dest="iterative_search", action="store_true", default=True)
+    parser.add_argument("--no-iterative-search", dest="iterative_search", action="store_false")
     parser.add_argument("--max-search-steps", type=int, default=5)
     parser.add_argument("--rollout-decision-max-tokens", type=int, default=512)
     parser.add_argument("--rollout-decision-thinking", action="store_true")
@@ -64,7 +92,26 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--verification-hits", type=int, default=6)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument("--ids", help="Comma-separated test case IDs to evaluate.")
+    parser.add_argument("--ids-file", help="File containing one test case ID per line.")
     return parser.parse_args(argv)
+
+
+def selected_ids(args: argparse.Namespace) -> List[str]:
+    ids: List[str] = []
+    if args.ids:
+        ids.extend(item.strip() for item in str(args.ids).split(",") if item.strip())
+    if args.ids_file:
+        with Path(args.ids_file).open("r", encoding="utf-8") as handle:
+            ids.extend(line.strip() for line in handle if line.strip() and not line.lstrip().startswith("#"))
+    seen = set()
+    out: List[str] = []
+    for item in ids:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
 
 
 def record_to_row(
@@ -77,6 +124,7 @@ def record_to_row(
     query_keywords: Sequence[str] = (),
     query_keyword_raw: str = "",
     query_keyword_error: str = "",
+    llm_rerank: Sequence[Mapping[str, Any]] = (),
     search_rollout: Sequence[Mapping[str, Any]] = (),
     answer_verification: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
@@ -89,6 +137,7 @@ def record_to_row(
         "llm_query_keywords": as_json(list(query_keywords)),
         "llm_query_keyword_raw": query_keyword_raw,
         "llm_query_keyword_error": query_keyword_error,
+        "llm_rerank": as_json(list(llm_rerank)),
         "search_rollout": as_json(list(search_rollout)),
         "answer_verification": as_json(dict(answer_verification or {})),
         "gt_answer": item["gt_answer"],
@@ -119,19 +168,49 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     records = read_jsonl(Path(args.testset))
     validate_records(records)
-    selected = records[args.offset :]
-    if args.limit is not None:
-        selected = selected[: args.limit]
+    ids = selected_ids(args)
+    if ids:
+        id_set = set(ids)
+        selected = [item for item in records if str(item["id"]) in id_set]
+        missing = [item for item in ids if item not in {str(record["id"]) for record in selected}]
+        if missing:
+            raise ValueError(f"unknown test case IDs: {', '.join(missing)}")
+    else:
+        selected = records[args.offset :]
+        if args.limit is not None:
+            selected = selected[: args.limit]
 
     config = UnifiedRAGConfig(
         db_path=Path(args.db_path),
+        retrieval_backend=args.retrieval_backend,
+        tantivy_index_dir=Path(args.tantivy_index_dir),
+        tantivy_candidates=args.tantivy_candidates,
+        lexical_candidates=args.lexical_candidates,
+        structured_candidates=args.structured_candidates,
+        enable_dense_retrieval=args.dense_retrieval,
+        dense_index_dir=Path(args.dense_index_dir),
+        dense_candidates=args.dense_candidates,
+        dense_embedding_base_url=args.embedding_base_url,
+        dense_embedding_model=args.embedding_model,
+        lexical_rrf_weight=args.lexical_rrf_weight,
+        structured_rrf_weight=args.structured_rrf_weight,
+        dense_rrf_weight=args.dense_rrf_weight,
+        hybrid_rrf_k=args.hybrid_rrf_k,
+        neighbor_expansion_window=args.neighbor_expansion_window,
+        neighbor_expansion_limit=args.neighbor_expansion_limit,
         top_k=args.top_k,
         max_context_chars=args.max_context_chars,
         max_tokens=args.max_tokens,
+        enable_thinking=args.enable_thinking,
         enable_llm_query_keywords=args.llm_query_keywords,
         query_keyword_max_tokens=args.query_keyword_max_tokens,
         query_keyword_max_terms=args.query_keyword_max_terms,
         query_keyword_enable_thinking=args.query_keyword_thinking,
+        enable_llm_rerank=args.llm_rerank,
+        llm_rerank_candidates=args.llm_rerank_candidates,
+        llm_rerank_max_tokens=args.llm_rerank_max_tokens,
+        llm_rerank_enable_thinking=args.llm_rerank_thinking,
+        llm_rerank_chars_per_hit=args.llm_rerank_chars_per_hit,
         enable_iterative_search=args.iterative_search,
         max_search_steps=args.max_search_steps,
         rollout_decision_max_tokens=args.rollout_decision_max_tokens,
@@ -160,6 +239,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 query_keywords = result.query_keywords
                 query_keyword_raw = result.query_keyword_raw
                 query_keyword_error = result.query_keyword_error
+                llm_rerank = result.llm_rerank
                 search_rollout = result.search_rollout
                 answer_verification = result.answer_verification
             except Exception as exc:
@@ -169,6 +249,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 query_keywords = []
                 query_keyword_raw = ""
                 query_keyword_error = f"{type(exc).__name__}: {exc}"
+                llm_rerank = []
                 search_rollout = []
                 answer_verification = {}
             latency = time.perf_counter() - started
@@ -181,6 +262,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 query_keywords=query_keywords,
                 query_keyword_raw=query_keyword_raw,
                 query_keyword_error=query_keyword_error,
+                llm_rerank=llm_rerank,
                 search_rollout=search_rollout,
                 answer_verification=answer_verification,
             )

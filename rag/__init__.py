@@ -1,6 +1,8 @@
 """Baseline RAG pipeline for Project 3."""
 
 from .answer_verification import AnswerVerification, generate_answer_verification
+from .dense_index import DenseVectorRAGIndex, EmbeddingAPIError, OpenAIEmbeddingClient, build_dense_index
+from .llm_rerank import LLMRerankResult, rerank_hits_with_llm
 from .pipeline import BaselineRAG, RAGAnswer, RAGConfig
 from .query_keywords import QueryKeywordPlan, generate_query_keywords, parse_keywords
 from .search_rollout import SearchRolloutDecision, SearchRolloutStep
@@ -23,6 +25,12 @@ __all__ = [
     "RAGConfig",
     "AnswerVerification",
     "generate_answer_verification",
+    "DenseVectorRAGIndex",
+    "EmbeddingAPIError",
+    "OpenAIEmbeddingClient",
+    "build_dense_index",
+    "LLMRerankResult",
+    "rerank_hits_with_llm",
     "QueryKeywordPlan",
     "generate_query_keywords",
     "parse_keywords",

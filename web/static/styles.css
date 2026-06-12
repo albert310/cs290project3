@@ -45,7 +45,8 @@ body {
 }
 
 button,
-textarea {
+textarea,
+input {
   font: inherit;
 }
 
@@ -239,6 +240,7 @@ button {
 .status-line,
 .query-keywords,
 .rollout-step,
+.rerank-step,
 .verification-step,
 .meta,
 .sources,
@@ -248,6 +250,7 @@ button {
 
 .status-line,
 .rollout-step,
+.rerank-step,
 .verification-step,
 .meta {
   display: flex;
@@ -261,6 +264,7 @@ button {
 
 .status-line::before,
 .rollout-step::before,
+.rerank-step::before,
 .verification-step::before {
   content: "";
   flex: 0 0 auto;
@@ -282,6 +286,15 @@ button {
 
 .rollout-step::before {
   background: var(--accent);
+}
+
+.rerank-step {
+  color: #5c4b6f;
+}
+
+.rerank-step::before {
+  background: #8b5cf6;
+  box-shadow: 0 0 0 5px rgba(139, 92, 246, 0.1);
 }
 
 .verification-step {
@@ -484,7 +497,8 @@ button {
   padding: 0 2px;
 }
 
-.mode-switch {
+.mode-switch,
+.token-budget {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -506,19 +520,22 @@ button {
     transform 160ms var(--ease);
 }
 
-.busy .mode-switch {
+.busy .mode-switch,
+.busy .token-budget {
   opacity: 0.72;
   pointer-events: none;
 }
 
-.mode-switch:hover {
+.mode-switch:hover,
+.token-budget:hover {
   border-color: rgba(201, 209, 220, 0.85);
   background: rgba(246, 247, 249, 0.82);
   color: #374151;
   transform: translateY(-1px);
 }
 
-.mode-switch:active {
+.mode-switch:active,
+.token-budget:active {
   transform: translateY(0) scale(0.98);
 }
 
@@ -575,6 +592,41 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.budget-label,
+.budget-unit {
+  flex: 0 0 auto;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.budget-unit {
+  font-size: 11px;
+  color: var(--muted-2);
+}
+
+.token-budget input {
+  width: 74px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 6px;
+  background: rgba(255, 255, 255, 0.84);
+  color: #243041;
+  font-size: 12px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  outline: 0;
+}
+
+.token-budget input:focus {
+  border-color: rgba(37, 99, 235, 0.52);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.token-budget input:disabled {
+  color: var(--muted);
 }
 
 .composer-main {

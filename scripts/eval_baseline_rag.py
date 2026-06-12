@@ -42,6 +42,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=6)
     parser.add_argument("--max-context-chars", type=int, default=5600)
     parser.add_argument("--max-tokens", type=int, default=None)
+    parser.add_argument("--thinking", dest="enable_thinking", action="store_true", default=True)
+    parser.add_argument("--no-thinking", dest="enable_thinking", action="store_false")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--rebuild-index", action="store_true")
@@ -92,6 +94,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         top_k=args.top_k,
         max_context_chars=args.max_context_chars,
         max_tokens=args.max_tokens,
+        enable_thinking=args.enable_thinking,
     )
     rag = BaselineRAG(config).open(rebuild_index=args.rebuild_index)
     output_path = Path(args.output_csv)

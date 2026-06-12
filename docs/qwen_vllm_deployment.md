@@ -3,7 +3,7 @@
 This project uses a local conda environment:
 
 ```bash
-/2022533109/chenyuhan/miniconda3/envs/cs290-qwen-vllm
+/home/test/test1713/miniconda3/envs/vllm
 ```
 
 Download model weights through the Hugging Face mirror:

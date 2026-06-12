@@ -2,8 +2,8 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONDA_ROOT="${CONDA_ROOT:-/2022533109/chenyuhan/miniconda3}"
-ENV_NAME="${ENV_NAME:-cs290-qwen-vllm}"
+CONDA_ROOT="${CONDA_ROOT:-/home/test/test1713/miniconda3}"
+ENV_NAME="${ENV_NAME:-vllm}"
 ENV_PYTHON="${ENV_PYTHON:-${CONDA_ROOT}/envs/${ENV_NAME}/bin/python}"
 CUDA_HOME="${CUDA_HOME:-${CONDA_ROOT}/envs/${ENV_NAME}}"
 MODEL_DIR="${MODEL_DIR:-${PROJECT_ROOT}/models/Qwen3.6-27B}"

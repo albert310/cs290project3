@@ -46,10 +46,11 @@ SYSTEM_PROMPT = """你是一个RAG检索查询规划器。
 1. 保留问题里的课程号、年份、教师姓名、学院名、专业名、研究中心名、英文术语。
 2. 可以补充中英文别名和同义词,例如 任课教师/Instructor, 研究方向/research interests。
 3. 如果用户问“介绍/简介/是什么/概况/overview”某个学院或机构,保留实体名,并补充概况类检索词,例如 About SIST、SIST overview、Vision and Mission、SIST AT A GLANCE。
-4. 删除“介绍一下”“是什么”“请问”“告诉我”“帮我查”等普通问句词,只保留可用于检索的实体、属性和同义词。
-5. 关键词要短,不要输出完整句子。
-6. 不要猜答案,不要编造事实。
-7. 最多输出12个关键词。"""
+4. 不要把用户没有明确询问的流程词加入关键词; 例如不要因为“介绍”就补充“申请指南”“评选办法”“报名流程”,除非用户原问题明确问申请、评选、流程、条件或办法。
+5. 删除“介绍一下”“是什么”“请问”“告诉我”“帮我查”等普通问句词,只保留可用于检索的实体、属性和同义词。
+6. 关键词要短,不要输出完整句子。
+7. 不要猜答案,不要编造事实。
+8. 最多输出12个关键词。"""
 
 
 def build_keyword_prompt(query: str) -> List[Mapping[str, str]]:
@@ -146,7 +147,18 @@ def parse_keywords(text: str, *, max_keywords: int = 12) -> List[str]:
 
 
 def make_search_query(query: str, keywords: Iterable[str]) -> str:
-    return " ".join(keyword for keyword in keywords if keyword)
+    parts: List[str] = []
+    seen = set()
+    for value in [query, *keywords]:
+        value = normalize_keyword(value)
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        parts.append(value)
+    return " ".join(parts)
 
 
 def generate_query_keywords(

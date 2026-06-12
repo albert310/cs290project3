@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SIST RAG Chat</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260604-ui5" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260610-budget1" />
   </head>
   <body>
     <main class="app-shell empty" id="app">
@@ -30,18 +30,30 @@
       <form class="composer" id="composer">
         <div class="composer-tools" aria-label="模型选项">
           <label class="mode-switch" title="深度思考">
-            <input class="mode-input" type="checkbox" id="thinkingToggle" checked />
+            <input class="mode-input" type="checkbox" id="thinkingToggle" />
             <span class="switch-track" aria-hidden="true">
               <span class="switch-thumb"></span>
             </span>
             <span class="mode-text">深度思考</span>
           </label>
           <label class="mode-switch" title="二次核验">
-            <input class="mode-input" type="checkbox" id="verificationToggle" checked />
+            <input class="mode-input" type="checkbox" id="verificationToggle" />
             <span class="switch-track" aria-hidden="true">
               <span class="switch-thumb"></span>
             </span>
             <span class="mode-text">二次核验</span>
+          </label>
+          <label class="mode-switch" title="LLM重排">
+            <input class="mode-input" type="checkbox" id="rerankToggle" checked />
+            <span class="switch-track" aria-hidden="true">
+              <span class="switch-thumb"></span>
+            </span>
+            <span class="mode-text">重排</span>
+          </label>
+          <label class="token-budget" title="生成预算">
+            <span class="budget-label">预算</span>
+            <input id="tokenBudgetInput" type="number" min="128" max="8192" step="128" value="2048" inputmode="numeric" />
+            <span class="budget-unit">tokens</span>
           </label>
         </div>
         <div class="composer-main">
@@ -53,6 +65,6 @@
         </div>
       </form>
     </main>
-    <script src="/static/app.js?v=20260606-topk20"></script>
+    <script src="/static/app.js?v=20260610-thinking8192"></script>
   </body>
 </html>

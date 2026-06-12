@@ -36,6 +36,7 @@ class RAGAnswer:
     query_keywords: List[str] = field(default_factory=list)
     query_keyword_raw: str = ""
     query_keyword_error: str = ""
+    llm_rerank: List[Dict[str, Any]] = field(default_factory=list)
     search_rollout: List[Dict[str, Any]] = field(default_factory=list)
     answer_verification: Dict[str, Any] = field(default_factory=dict)
 
@@ -51,6 +52,7 @@ class RAGAnswer:
             "query_keywords": self.query_keywords,
             "query_keyword_raw": self.query_keyword_raw,
             "query_keyword_error": self.query_keyword_error,
+            "llm_rerank": self.llm_rerank,
             "search_rollout": self.search_rollout,
             "answer_verification": self.answer_verification,
         }

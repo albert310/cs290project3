@@ -12,7 +12,7 @@ import tantivy
 
 from retrieval.keyword_search import tokenize
 
-from .unified_index import UnifiedRAGIndex, UnifiedSearchHit, _expand_query, _row_to_hit
+from .unified_index import DEFAULT_DB_PATH, UnifiedRAGIndex, UnifiedSearchHit, _expand_query, _row_to_hit, resolve_db_path
 
 
 DEFAULT_TANTIVY_INDEX_DIR = Path(".cache/tantivy_rag")
@@ -124,6 +124,7 @@ def build_index(
     limit: Optional[int] = None,
     batch_size: int = 2000,
 ) -> None:
+    db_path = resolve_db_path(db_path)
     if rebuild and index_dir.exists():
         shutil.rmtree(index_dir)
     index_dir.mkdir(parents=True, exist_ok=True)
@@ -185,13 +186,13 @@ def doc_chunk_id(doc: tantivy.Document) -> int:
 class TantivyRAGIndex:
     def __init__(
         self,
-        db_path: Path = Path("data/rag/knowledge.sqlite"),
+        db_path: Path = DEFAULT_DB_PATH,
         index_dir: Path = DEFAULT_TANTIVY_INDEX_DIR,
         *,
         candidate_limit: int = 240,
         auto_build: bool = True,
     ) -> None:
-        self.db_path = db_path
+        self.db_path = resolve_db_path(db_path)
         self.index_dir = index_dir
         self.candidate_limit = candidate_limit
         self.auto_build = auto_build

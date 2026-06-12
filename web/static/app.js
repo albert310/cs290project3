@@ -6,10 +6,17 @@ const sendButton = document.querySelector("#sendButton");
 const clearButton = document.querySelector("#clearButton");
 const thinkingToggle = document.querySelector("#thinkingToggle");
 const verificationToggle = document.querySelector("#verificationToggle");
-const modeInputs = [thinkingToggle, verificationToggle];
+const rerankToggle = document.querySelector("#rerankToggle");
+const tokenBudgetInput = document.querySelector("#tokenBudgetInput");
+const modeInputs = [thinkingToggle, verificationToggle, rerankToggle, tokenBudgetInput];
+const DEFAULT_TOKEN_BUDGET = 2048;
+const THINKING_TOKEN_BUDGET = 8192;
+const MIN_TOKEN_BUDGET = 128;
+const MAX_TOKEN_BUDGET = 8192;
 
 let busy = false;
 let scrollFrame = 0;
+let activeController = null;
 
 function escapeHtml(value) {
   return value
@@ -164,6 +171,23 @@ function renderAnswerVerification(parent, payload) {
   scrollToEnd();
 }
 
+function renderLLMRerank(parent, payload) {
+  const item = document.createElement("div");
+  item.className = "rerank-step";
+
+  const stage = payload.stage ? ` · ${payload.stage}` : "";
+  const error = payload.error ? " · 回退" : "";
+  const selected = payload.selected_count ?? 0;
+  const candidates = payload.candidate_count ?? 0;
+  item.textContent = `LLM重排${stage} · ${selected}/${candidates}${error}`;
+  if (payload.error) {
+    item.title = payload.error;
+  }
+
+  parent.appendChild(item);
+  scrollToEnd();
+}
+
 function renderThink(parent, think) {
   if (!think?.trim()) return;
 
@@ -224,6 +248,31 @@ function clearStatus(parent) {
   parent.querySelector("[data-role='status']")?.remove();
 }
 
+function readTokenBudget() {
+  const parsed = Number.parseInt(tokenBudgetInput.value, 10);
+  const safe = Number.isFinite(parsed) ? parsed : DEFAULT_TOKEN_BUDGET;
+  const clamped = Math.min(MAX_TOKEN_BUDGET, Math.max(MIN_TOKEN_BUDGET, safe));
+  tokenBudgetInput.value = String(clamped);
+  return clamped;
+}
+
+function currentTokenBudgetValue() {
+  const parsed = Number.parseInt(tokenBudgetInput.value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function syncThinkingBudget() {
+  const current = currentTokenBudgetValue();
+  if (thinkingToggle.checked) {
+    if (current === null || current < THINKING_TOKEN_BUDGET) {
+      tokenBudgetInput.value = String(THINKING_TOKEN_BUDGET);
+    }
+  } else if (current === THINKING_TOKEN_BUDGET) {
+    tokenBudgetInput.value = String(DEFAULT_TOKEN_BUDGET);
+  }
+  readTokenBudget();
+}
+
 function parseSseBlock(block) {
   const lines = block.split(/\r?\n/);
   let event = "";
@@ -245,15 +294,18 @@ function parseSseBlock(block) {
   }
 }
 
-async function streamAsk(query, options, onEvent) {
+async function streamAsk(query, options, signal, onEvent) {
   const response = await fetch("/api/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal,
     body: JSON.stringify({
       query,
       top_k: 20,
       enable_thinking: options.enableThinking,
       verify_answer: options.verifyAnswer,
+      llm_rerank: options.llmRerank,
+      max_tokens: options.maxTokens,
     }),
   });
 
@@ -293,9 +345,13 @@ async function submitQuestion() {
   appendMessage("user", query);
   const assistantItem = appendMessage("assistant", "");
   const bubble = assistantItem.querySelector(".bubble");
+  const controller = new AbortController();
+  activeController = controller;
   const options = {
     enableThinking: thinkingToggle.checked,
     verifyAnswer: verificationToggle.checked,
+    llmRerank: rerankToggle.checked,
+    maxTokens: readTokenBudget(),
   };
   let hits = [];
   let answerStarted = false;
@@ -304,7 +360,8 @@ async function submitQuestion() {
   assistantItem.classList.add("streaming");
   setStatus(assistantItem, "正在检索资料");
   try {
-    await streamAsk(query, options, (payload) => {
+    await streamAsk(query, options, controller.signal, (payload) => {
+      if (controller.signal.aborted) return;
       if (payload.event === "query_keywords") {
         setStatus(assistantItem, "已生成检索词");
         renderQueryKeywords(assistantItem, payload.keywords || [], payload.search_query);
@@ -314,6 +371,9 @@ async function submitQuestion() {
       } else if (payload.event === "answer_verification") {
         setStatus(assistantItem, "正在二次核验");
         renderAnswerVerification(assistantItem, payload);
+      } else if (payload.event === "llm_rerank") {
+        setStatus(assistantItem, "正在重排资料");
+        renderLLMRerank(assistantItem, payload);
       } else if (payload.event === "sources") {
         hits = payload.hits || [];
         setStatus(assistantItem, "正在阅读资料");
@@ -338,7 +398,8 @@ async function submitQuestion() {
         meta.className = "meta";
         const elapsed = payload.latency_sec;
         const finish = payload.finish_reason ? ` · ${payload.finish_reason}` : "";
-        meta.textContent = `检索 ${hits.length} 条资料${elapsed ? ` · ${elapsed.toFixed(1)}s` : ""}${finish}`;
+        const budget = payload.max_tokens || options.maxTokens;
+        meta.textContent = `检索 ${hits.length} 条资料 · 预算 ${budget} tokens${elapsed ? ` · ${elapsed.toFixed(1)}s` : ""}${finish}`;
         assistantItem.appendChild(meta);
       } else if (payload.event === "error") {
         throw new Error(payload.error || "stream error");
@@ -349,14 +410,18 @@ async function submitQuestion() {
       bubble.textContent = "根据当前资料无法确认。";
     }
   } catch (error) {
+    if (controller.signal.aborted) return;
     assistantItem.classList.remove("streaming");
     clearStatus(assistantItem);
     bubble.textContent = `请求失败：${error instanceof Error ? error.message : String(error)}`;
   } finally {
-    assistantItem.classList.remove("streaming");
-    setBusy(false);
-    inputEl.focus();
-    scrollToEnd();
+    if (activeController === controller) {
+      activeController = null;
+      assistantItem.classList.remove("streaming");
+      setBusy(false);
+      inputEl.focus();
+      scrollToEnd();
+    }
   }
 }
 
@@ -366,6 +431,9 @@ formEl.addEventListener("submit", (event) => {
 });
 
 inputEl.addEventListener("input", resizeInput);
+thinkingToggle.addEventListener("change", syncThinkingBudget);
+tokenBudgetInput.addEventListener("change", readTokenBudget);
+tokenBudgetInput.addEventListener("blur", readTokenBudget);
 inputEl.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
@@ -374,12 +442,16 @@ inputEl.addEventListener("keydown", (event) => {
 });
 
 clearButton.addEventListener("click", () => {
+  activeController?.abort();
+  activeController = null;
   messagesEl.innerHTML = "";
   appEl.classList.add("empty");
+  setBusy(false);
   inputEl.value = "";
   resizeInput();
   inputEl.focus();
 });
 
+syncThinkingBudget();
 resizeInput();
 inputEl.focus();

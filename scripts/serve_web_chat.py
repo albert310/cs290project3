@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from qwen_api import QwenAPIError
 from rag import BaselineRAG, RAGConfig, UnifiedRAG, UnifiedRAGConfig
 
 
@@ -23,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 STATIC_DIR = ROOT / "web" / "static"
 RAG_INSTANCE: Any | None = None
 RAG_LOCK = threading.Lock()
+THINKING_DEFAULT_MAX_TOKENS = 8192
 
 
 def find_port(start: int, host: str) -> int:
@@ -58,8 +60,43 @@ def optional_bool(payload: Dict[str, Any], key: str) -> bool | None:
     raise ValueError(f"{key} must be boolean")
 
 
+def optional_int(
+    payload: Dict[str, Any],
+    key: str,
+    *,
+    min_value: int | None = None,
+    max_value: int | None = None,
+) -> int | None:
+    if key not in payload:
+        return None
+    value = payload.get(key)
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{key} must be integer")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{key} must be integer") from exc
+    if min_value is not None and parsed < min_value:
+        raise ValueError(f"{key} must be >= {min_value}")
+    if max_value is not None and parsed > max_value:
+        raise ValueError(f"{key} must be <= {max_value}")
+    return parsed
+
+
+def request_max_tokens(rag: Any, enable_thinking: bool | None, max_tokens: int | None) -> int | None:
+    if max_tokens is not None:
+        return max_tokens
+    config = getattr(rag, "config", None)
+    thinking = enable_thinking if enable_thinking is not None else bool(getattr(config, "enable_thinking", False))
+    if thinking:
+        return THINKING_DEFAULT_MAX_TOKENS
+    return None
+
+
 @contextmanager
-def temporary_config_overrides(rag: Any, **overrides: bool | None):
+def temporary_config_overrides(rag: Any, **overrides: Any | None):
     config = getattr(rag, "config", None)
     original: Dict[str, Any] = {}
     if config is not None:
@@ -114,6 +151,9 @@ class ChatHandler(BaseHTTPRequestHandler):
             top_k = int(payload.get("top_k") or RAG_INSTANCE.config.top_k)
             enable_thinking = optional_bool(payload, "enable_thinking")
             verify_answer = optional_bool(payload, "verify_answer")
+            llm_rerank = optional_bool(payload, "llm_rerank")
+            iterative_search = optional_bool(payload, "iterative_search")
+            max_tokens = optional_int(payload, "max_tokens", min_value=128, max_value=8192)
         except Exception as exc:
             self.send_json({"error": f"invalid request: {exc}"}, status=HTTPStatus.BAD_REQUEST)
             return
@@ -124,11 +164,15 @@ class ChatHandler(BaseHTTPRequestHandler):
 
         started = time.perf_counter()
         try:
+            effective_max_tokens = request_max_tokens(RAG_INSTANCE, enable_thinking, max_tokens)
             with RAG_LOCK:
                 with temporary_config_overrides(
                     RAG_INSTANCE,
                     enable_thinking=enable_thinking,
                     enable_answer_verification=verify_answer,
+                    enable_llm_rerank=llm_rerank,
+                    enable_iterative_search=iterative_search,
+                    max_tokens=effective_max_tokens,
                 ):
                     result = RAG_INSTANCE.answer(query, top_k=top_k)
             latency = time.perf_counter() - started
@@ -139,6 +183,7 @@ class ChatHandler(BaseHTTPRequestHandler):
                     "query_keywords": result.query_keywords,
                     "search_query": result.search_query or result.query,
                     "query_keyword_error": result.query_keyword_error,
+                    "llm_rerank": result.llm_rerank,
                     "search_rollout": result.search_rollout,
                     "answer_verification": result.answer_verification,
                     "hits": [hit.to_dict() for hit in result.hits],
@@ -146,8 +191,24 @@ class ChatHandler(BaseHTTPRequestHandler):
                     "usage": result.usage,
                     "enable_thinking": enable_thinking,
                     "verify_answer": verify_answer,
+                    "enable_llm_rerank": (
+                        llm_rerank if llm_rerank is not None else RAG_INSTANCE.config.enable_llm_rerank
+                    ),
+                    "enable_iterative_search": (
+                        iterative_search
+                        if iterative_search is not None
+                        else RAG_INSTANCE.config.enable_iterative_search
+                    ),
+                    "max_tokens": (
+                        effective_max_tokens
+                        if effective_max_tokens is not None
+                        else RAG_INSTANCE.config.max_tokens
+                    ),
                 }
             )
+        except QwenAPIError as exc:
+            status = HTTPStatus.BAD_GATEWAY if exc.status is not None else HTTPStatus.SERVICE_UNAVAILABLE
+            self.send_json({"error": f"Qwen service error: {exc}"}, status=status)
         except Exception as exc:
             self.send_json({"error": f"{type(exc).__name__}: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
@@ -165,6 +226,9 @@ class ChatHandler(BaseHTTPRequestHandler):
             top_k = int(payload.get("top_k") or RAG_INSTANCE.config.top_k)
             enable_thinking = optional_bool(payload, "enable_thinking")
             verify_answer = optional_bool(payload, "verify_answer")
+            llm_rerank = optional_bool(payload, "llm_rerank")
+            iterative_search = optional_bool(payload, "iterative_search")
+            max_tokens = optional_int(payload, "max_tokens", min_value=128, max_value=8192)
         except Exception as exc:
             self.send_json({"error": f"invalid request: {exc}"}, status=HTTPStatus.BAD_REQUEST)
             return
@@ -181,18 +245,29 @@ class ChatHandler(BaseHTTPRequestHandler):
 
         started = time.perf_counter()
         try:
+            effective_max_tokens = request_max_tokens(RAG_INSTANCE, enable_thinking, max_tokens)
             with RAG_LOCK:
                 with temporary_config_overrides(
                     RAG_INSTANCE,
                     enable_thinking=enable_thinking,
                     enable_answer_verification=verify_answer,
+                    enable_llm_rerank=llm_rerank,
+                    enable_iterative_search=iterative_search,
+                    max_tokens=effective_max_tokens,
                 ):
                     for event in RAG_INSTANCE.stream(query, top_k=top_k):
                         if event.get("event") == "done":
                             event["latency_sec"] = time.perf_counter() - started
+                            event["max_tokens"] = (
+                                effective_max_tokens
+                                if effective_max_tokens is not None
+                                else RAG_INSTANCE.config.max_tokens
+                            )
                         self.send_sse(str(event.get("event") or "message"), event)
         except BrokenPipeError:
             return
+        except QwenAPIError as exc:
+            self.send_sse("error", {"event": "error", "error": f"Qwen service error: {exc}"})
         except Exception as exc:
             self.send_sse("error", {"event": "error", "error": f"{type(exc).__name__}: {exc}"})
 
@@ -246,6 +321,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--retrieval-backend", choices=("sqlite", "tantivy"), default="sqlite")
     parser.add_argument("--tantivy-index-dir", default=".cache/tantivy_rag")
     parser.add_argument("--tantivy-candidates", type=int, default=240)
+    parser.add_argument("--lexical-candidates", type=int, default=240)
+    parser.add_argument("--structured-candidates", type=int, default=160)
+    parser.add_argument("--dense-retrieval", dest="dense_retrieval", action="store_true")
+    parser.add_argument("--no-dense-retrieval", dest="dense_retrieval", action="store_false")
+    parser.set_defaults(dense_retrieval=False)
+    parser.add_argument("--dense-index-dir", default=".cache/dense_rag")
+    parser.add_argument("--dense-candidates", type=int, default=160)
+    parser.add_argument("--embedding-base-url", default="http://127.0.0.1:8001")
+    parser.add_argument("--embedding-model", default="qwen3-embedding-4b")
+    parser.add_argument("--lexical-rrf-weight", type=float, default=1.0)
+    parser.add_argument("--structured-rrf-weight", type=float, default=1.15)
+    parser.add_argument("--dense-rrf-weight", type=float, default=1.0)
+    parser.add_argument("--hybrid-rrf-k", type=int, default=60)
+    parser.add_argument("--neighbor-expansion-window", type=int, default=1)
+    parser.add_argument("--neighbor-expansion-limit", type=int, default=48)
     parser.add_argument("--texts-dir", default="data/sist/texts")
     parser.add_argument("--cache-path", default=".cache/rag_baseline_texts.sqlite")
     parser.add_argument("--top-k", type=int, default=None)
@@ -256,7 +346,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--query-keyword-max-tokens", type=int, default=256)
     parser.add_argument("--query-keyword-max-terms", type=int, default=12)
     parser.add_argument("--query-keyword-thinking", action="store_true")
-    parser.add_argument("--iterative-search", action="store_true")
+    parser.add_argument("--llm-rerank", dest="llm_rerank", action="store_true", default=True)
+    parser.add_argument("--no-llm-rerank", dest="llm_rerank", action="store_false")
+    parser.add_argument("--llm-rerank-candidates", type=int, default=64)
+    parser.add_argument("--llm-rerank-max-tokens", type=int, default=768)
+    parser.add_argument("--llm-rerank-thinking", action="store_true")
+    parser.add_argument("--llm-rerank-chars-per-hit", type=int, default=500)
+    parser.add_argument("--iterative-search", dest="iterative_search", action="store_true", default=True)
+    parser.add_argument("--no-iterative-search", dest="iterative_search", action="store_false")
     parser.add_argument("--max-search-steps", type=int, default=5)
     parser.add_argument("--rollout-decision-max-tokens", type=int, default=512)
     parser.add_argument("--rollout-decision-thinking", action="store_true")
@@ -289,6 +386,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             retrieval_backend=args.retrieval_backend,
             tantivy_index_dir=Path(args.tantivy_index_dir),
             tantivy_candidates=args.tantivy_candidates,
+            lexical_candidates=args.lexical_candidates,
+            structured_candidates=args.structured_candidates,
+            enable_dense_retrieval=args.dense_retrieval,
+            dense_index_dir=Path(args.dense_index_dir),
+            dense_candidates=args.dense_candidates,
+            dense_embedding_base_url=args.embedding_base_url,
+            dense_embedding_model=args.embedding_model,
+            lexical_rrf_weight=args.lexical_rrf_weight,
+            structured_rrf_weight=args.structured_rrf_weight,
+            dense_rrf_weight=args.dense_rrf_weight,
+            hybrid_rrf_k=args.hybrid_rrf_k,
+            neighbor_expansion_window=args.neighbor_expansion_window,
+            neighbor_expansion_limit=args.neighbor_expansion_limit,
             top_k=args.top_k or 8,
             max_context_chars=args.max_context_chars if args.max_context_chars is not None else 7200,
             max_tokens=args.max_tokens,
@@ -296,6 +406,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             query_keyword_max_tokens=args.query_keyword_max_tokens,
             query_keyword_max_terms=args.query_keyword_max_terms,
             query_keyword_enable_thinking=args.query_keyword_thinking,
+            enable_llm_rerank=args.llm_rerank,
+            llm_rerank_candidates=args.llm_rerank_candidates,
+            llm_rerank_max_tokens=args.llm_rerank_max_tokens,
+            llm_rerank_enable_thinking=args.llm_rerank_thinking,
+            llm_rerank_chars_per_hit=args.llm_rerank_chars_per_hit,
             enable_iterative_search=args.iterative_search,
             max_search_steps=args.max_search_steps,
             rollout_decision_max_tokens=args.rollout_decision_max_tokens,
